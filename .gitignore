@@ -1,0 +1,32 @@
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Local runtime output
+*.log
+esp32-csi-gemma-filter/python-engine/data/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
