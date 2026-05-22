@@ -36,4 +36,9 @@ def test_parse_line_non_numeric():
 
 def test_parse_line_empty():
     assert parse_line("") is None
+
+
+def test_parse_line_ignores_firmware_status_lines(caplog):
+    assert parse_line("# REAL_CSI_WIFI_CONNECTING") is None
+    assert "Invalid line format" not in caplog.text
     assert parse_line("   ") is None

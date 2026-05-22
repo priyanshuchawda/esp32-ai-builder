@@ -16,6 +16,8 @@
 namespace {
 constexpr uint32_t kBaudRate = 115200;
 constexpr uint32_t kSampleIntervalMs = 100;
+constexpr uint32_t kWifiConnectTimeoutMs = 15000;
+constexpr uint32_t kRealCsiFirstFrameTimeoutMs = 10000;
 constexpr int kStatusLedPin = 2;
 constexpr int kCsiBins = 6;
 
@@ -27,6 +29,7 @@ struct CsiSample {
 };
 
 volatile bool g_hasRealCsi = false;
+bool g_useSimulatedFallback = false;
 CsiSample g_latestSample = {};
 portMUX_TYPE g_sampleMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -53,6 +56,11 @@ void printCsvSample(const CsiSample &sample) {
                 sample.bins[3],
                 sample.bins[4],
                 sample.bins[5]);
+}
+
+void printStatus(const char *message) {
+  Serial.print("# ");
+  Serial.println(message);
 }
 
 void printSimulatedSample() {
@@ -110,17 +118,20 @@ void csiCallback(void *, wifi_csi_info_t *data) {
 }
 
 bool startRealCsiCapture() {
+  printStatus("REAL_CSI_WIFI_CONNECTING");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   const uint32_t startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < 15000U) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kWifiConnectTimeoutMs) {
     delay(250);
   }
 
   if (WiFi.status() != WL_CONNECTED) {
+    printStatus("REAL_CSI_WIFI_CONNECT_FAILED_SIMULATED_FALLBACK");
     return false;
   }
+  printStatus("REAL_CSI_WIFI_CONNECTED");
 
   wifi_csi_config_t csiConfig = {};
   csiConfig.lltf_en = true;
@@ -132,18 +143,23 @@ bool startRealCsiCapture() {
   csiConfig.shift = 0;
 
   if (esp_wifi_set_csi_rx_cb(csiCallback, nullptr) != ESP_OK) {
+    printStatus("REAL_CSI_CALLBACK_FAILED_SIMULATED_FALLBACK");
     return false;
   }
   if (esp_wifi_set_csi_config(&csiConfig) != ESP_OK) {
+    printStatus("REAL_CSI_CONFIG_FAILED_SIMULATED_FALLBACK");
     return false;
   }
   if (esp_wifi_set_promiscuous(true) != ESP_OK) {
+    printStatus("REAL_CSI_PROMISCUOUS_FAILED_SIMULATED_FALLBACK");
     return false;
   }
   if (esp_wifi_set_csi(true) != ESP_OK) {
+    printStatus("REAL_CSI_ENABLE_FAILED_SIMULATED_FALLBACK");
     return false;
   }
 
+  printStatus("REAL_CSI_ENABLED_WAITING_FOR_FRAMES");
   return true;
 }
 #endif
@@ -156,8 +172,10 @@ void setup() {
 
 #if HAS_WIFI_CREDENTIALS
   if (!startRealCsiCapture()) {
-    g_hasRealCsi = false;
+    g_useSimulatedFallback = true;
   }
+#else
+  printStatus("WIFI_CREDENTIALS_ABSENT_SIMULATED_FALLBACK");
 #endif
 }
 
@@ -166,6 +184,21 @@ void loop() {
   static uint32_t lastPrintedSequence = 0;
 
 #if HAS_WIFI_CREDENTIALS
+  static uint32_t firstFrameWaitStartMs = millis();
+  if (!g_useSimulatedFallback && !g_hasRealCsi &&
+      millis() - firstFrameWaitStartMs > kRealCsiFirstFrameTimeoutMs) {
+    printStatus("REAL_CSI_NO_FRAMES_SIMULATED_FALLBACK");
+    g_useSimulatedFallback = true;
+  }
+
+  if (g_useSimulatedFallback) {
+    printSimulatedSample();
+    delay(kSampleIntervalMs);
+    ledState = !ledState;
+    digitalWrite(kStatusLedPin, ledState ? HIGH : LOW);
+    return;
+  }
+
   CsiSample sample = {};
   bool hasNewRealSample = false;
   portENTER_CRITICAL(&g_sampleMux);
