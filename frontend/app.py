@@ -1715,79 +1715,66 @@ if is_running:
     </div>
     """, unsafe_allow_html=True)
 
-    last_chart_update = 0.0
-    
-    # Bounded visual updates loop (refresh UI for ~4 seconds, then yield execution to Streamlit)
-    for _ in range(100):
-        if thread_shutdown.is_set():
+    # Extract the latest package from background thread
+    latest_package = None
+    while not data_queue.empty():
+        try:
+            latest_package = data_queue.get_nowait()
+        except queue.Empty:
             break
             
-        # Extract the latest package from background thread
-        latest_package = None
-        while not data_queue.empty():
-            try:
-                latest_package = data_queue.get_nowait()
-            except queue.Empty:
-                break
-                
-        if latest_package:
-            stats = latest_package["stats"]
-            telemetry = latest_package["telemetry"]
-            raw_hist = latest_package["raw_history"]
-            filt_hist = latest_package["filtered_history"]
-            resp_hist = latest_package["resp_history"]
-            
-            # Check for error reported by background thread
-            if "error" in latest_package:
-                st.error(latest_package["error"])
-                thread_shutdown.set()
-                st.rerun()
-            
-            # 1. Fall warning light banner
-            if telemetry["fall_alert"]:
-                ui_fall_alert.markdown("<div class='fall-banner'>⚠️ FALL DETECTED!</div>", unsafe_allow_html=True)
-            else:
-                ui_fall_alert.empty()
-                
-            # Draw telemetry cards
-            draw_vital_signs(telemetry, ui_vital_signs)
-            draw_sleep_apnea(telemetry, ui_apnea)
-            draw_wifi_signal(stats, telemetry, raw_hist, ui_wifi_signal)
-            draw_presence(telemetry, ui_presence)
-            draw_apnea_events(telemetry, ui_apnea_events)
-            
-            # Draw bottom indicators
-            draw_indicators_and_keys(telemetry, ui_indicators)
-            
-            # 4. Throttled charts redraw (at ~7 Hz) to avoid CPU spikes
-            now = time.time()
-            if now - last_chart_update >= 0.15:
-                last_chart_update = now
-                
-                # Draw 3D Observatory (incorporates optimized single-trace sphere drawing)
-                fig_3d = generate_3d_observatory(telemetry, stats)
-                ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
-                
-                # Graph 1: Raw & Filtered CSI
-                fig_csi = go.Figure()
-                fig_csi.add_trace(go.Scatter(y=raw_hist, mode='lines', name='Raw Signal', line=dict(color='#00ffcc', width=1.5)))
-                fig_csi.add_trace(go.Scatter(y=filt_hist, mode='lines', name='Filtered CSI', line=dict(color='#33ff33', width=2.0)))
-                fig_csi.update_layout(
-                    title="Raw Subcarrier Magnitude (Mean)",
-                    **plotly_layout_args
-                )
-                ui_csi_chart.plotly_chart(fig_csi, use_container_width=True)
-                
-                # Graph 2: Extracted Respiration Waveform
-                fig_resp = go.Figure()
-                fig_resp.add_trace(go.Scatter(y=resp_hist, mode='lines', name='Respiration Waveform', line=dict(color='#ff5555', width=2.0)))
-                fig_resp.update_layout(
-                    title="Extracted Respiration Waveform (0.1-0.5 Hz)",
-                    **plotly_layout_args
-                )
-                ui_resp_chart.plotly_chart(fig_resp, use_container_width=True)
-                
-        time.sleep(0.04) # Paced 25 Hz UI refresh rate
+    if latest_package:
+        stats = latest_package["stats"]
+        telemetry = latest_package["telemetry"]
+        raw_hist = latest_package["raw_history"]
+        filt_hist = latest_package["filtered_history"]
+        resp_hist = latest_package["resp_history"]
         
+        # Check for error reported by background thread
+        if "error" in latest_package:
+            st.error(latest_package["error"])
+            thread_shutdown.set()
+            st.rerun()
+        
+        # 1. Fall warning light banner
+        if telemetry["fall_alert"]:
+            ui_fall_alert.markdown("<div class='fall-banner'>⚠️ FALL DETECTED!</div>", unsafe_allow_html=True)
+        else:
+            ui_fall_alert.empty()
+            
+        # Draw telemetry cards
+        draw_vital_signs(telemetry, ui_vital_signs)
+        draw_sleep_apnea(telemetry, ui_apnea)
+        draw_wifi_signal(stats, telemetry, raw_hist, ui_wifi_signal)
+        draw_presence(telemetry, ui_presence)
+        draw_apnea_events(telemetry, ui_apnea_events)
+        
+        # Draw bottom indicators
+        draw_indicators_and_keys(telemetry, ui_indicators)
+        
+        # Draw 3D Observatory
+        fig_3d = generate_3d_observatory(telemetry, stats)
+        ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
+        
+        # Graph 1: Raw & Filtered CSI
+        fig_csi = go.Figure()
+        fig_csi.add_trace(go.Scatter(y=raw_hist, mode='lines', name='Raw Signal', line=dict(color='#00ffcc', width=1.5)))
+        fig_csi.add_trace(go.Scatter(y=filt_hist, mode='lines', name='Filtered CSI', line=dict(color='#33ff33', width=2.0)))
+        fig_csi.update_layout(
+            title="Raw Subcarrier Magnitude (Mean)",
+            **plotly_layout_args
+        )
+        ui_csi_chart.plotly_chart(fig_csi, use_container_width=True)
+        
+        # Graph 2: Extracted Respiration Waveform
+        fig_resp = go.Figure()
+        fig_resp.add_trace(go.Scatter(y=resp_hist, mode='lines', name='Respiration Waveform', line=dict(color='#ff5555', width=2.0)))
+        fig_resp.update_layout(
+            title="Extracted Respiration Waveform (0.1-0.5 Hz)",
+            **plotly_layout_args
+        )
+        ui_resp_chart.plotly_chart(fig_resp, use_container_width=True)
+        
+    time.sleep(0.08) # 12 Hz UI refresh rate for smooth rendering with minimal CPU overhead
     st.rerun()
 
