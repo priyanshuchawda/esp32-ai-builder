@@ -4,7 +4,9 @@ from gemma_advisor import (
     cleanse_json_response,
     config,
     get_rule_based_decision,
+    query_gemini_advisor,
     query_gemma_advisor,
+    query_ollama_advisor,
 )
 
 
@@ -49,8 +51,42 @@ def test_get_rule_based_decision():
     assert decision_quiet["filter"] == "none"
 
 
+def test_query_gemini_advisor_success(monkeypatch):
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
+
+    fake_client = MagicMock()
+    fake_response = MagicMock()
+    fake_response.text = '```json\n{\n  "filter": "hampel",\n  "window_size": 9,\n  "outlier_threshold": 2.5,\n  "lowpass_alpha": 0.25,\n  "confidence": 0.95,\n  "reason": "High variance with spike noise"\n}\n```'
+    fake_client.models.generate_content.return_value = fake_response
+
+    features = {"outlier_ratio": 0.05, "signal_std": 1.2}
+    decision = query_gemini_advisor(features, client_factory=lambda: fake_client)
+
+    assert decision["filter"] == "hampel"
+    assert decision["window_size"] == 9
+    assert decision["outlier_threshold"] == 2.5
+    assert decision["confidence"] == 0.95
+
+    call = fake_client.models.generate_content.call_args
+    assert call.kwargs["model"] == "gemma-4-31b-it"
+    assert "summary features" in call.kwargs["contents"]
+    assert call.kwargs["config"].response_mime_type == "application/json"
+
+
+def test_query_gemma_advisor_falls_back_without_gemini_key(monkeypatch):
+    monkeypatch.setattr(config, "GEMMA_ADVISOR_PROVIDER", "gemini")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+
+    features = {"outlier_ratio": 0.20, "signal_std": 1.2}
+    decision = query_gemma_advisor(features)
+
+    assert decision["filter"] == "median"
+    assert "Rule-based fallback" in decision["reason"]
+
+
 @patch("requests.post")
-def test_query_gemma_advisor_success(mock_post):
+def test_query_ollama_advisor_success(mock_post):
     # Mock a successful response from Ollama API
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -62,7 +98,7 @@ def test_query_gemma_advisor_success(mock_post):
     mock_post.return_value = mock_resp
 
     features = {"outlier_ratio": 0.05, "signal_std": 1.2}
-    decision = query_gemma_advisor(features)
+    decision = query_ollama_advisor(features)
 
     assert decision["filter"] == "hampel"
     assert decision["window_size"] == 9
@@ -72,13 +108,13 @@ def test_query_gemma_advisor_success(mock_post):
 
 
 @patch("requests.post")
-def test_query_gemma_advisor_failure_fallback(mock_post):
+def test_query_ollama_advisor_failure_fallback(mock_post):
     # Mock connection timeout/failure
     mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
 
     features = {"outlier_ratio": 0.20, "signal_std": 1.2}
     # Should fall back to rule-based because requests raised an error
-    decision = query_gemma_advisor(features)
+    decision = query_ollama_advisor(features)
 
     assert decision is not None
     # Features has outlier_ratio > 0.10, so fallback should recommend median
