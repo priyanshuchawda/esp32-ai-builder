@@ -31,3 +31,7 @@ esp32-csi-gemma-filter/python-engine/data/
 Thumbs.db
 .vscode/
 .idea/
+
+# External repos/models
+RuView/
+wifi-densepose-pretrained/
