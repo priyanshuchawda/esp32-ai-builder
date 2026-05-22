@@ -39,6 +39,12 @@ Build the local activity model from collected labels:
 uv run --with-requirements python-engine/requirements.txt python python-engine/activity_classifier.py
 ```
 
+Enable live activity prediction during a run after enough labels are collected:
+
+```powershell
+uv run --with-requirements python-engine/requirements.txt python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --activity-classifier --advisor-provider rules
+```
+
 ## Test
 
 ```powershell

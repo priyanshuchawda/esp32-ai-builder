@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 
 import config
+from activity_classifier import load_activity_model, predict_activity
 from simulator import generate_noisy_data
 from serial_reader import SerialReader
 from csi_parser import parse_line
@@ -65,7 +66,24 @@ def parse_args():
         default=None,
         help="Override the advisor provider for this run. Use 'rules' for fast calibration capture.",
     )
+    parser.add_argument(
+        "--activity-classifier",
+        action="store_true",
+        help="Load calibration labels and log predicted activity per processed window.",
+    )
+    parser.add_argument(
+        "--activity-min-records-per-label",
+        type=int,
+        default=3,
+        help="Minimum labeled windows per activity before live prediction is enabled.",
+    )
     return parser.parse_args()
+
+
+def classify_activity_window(features: dict, activity_model: dict | None) -> dict | None:
+    if not activity_model or not activity_model.get("eligible"):
+        return None
+    return predict_activity(features, activity_model)
 
 
 def run_app():
@@ -77,6 +95,22 @@ def run_app():
     session_id = f"session_{datetime.now().strftime('%Y_%m_%d_%H%M%S')}"
     logger.info(f"Starting {args.mode} mode. Session ID: {session_id}")
     presence_alerter = TelegramPresenceAlerter.from_env()
+    activity_model = None
+    if args.activity_classifier:
+        activity_model = load_activity_model(
+            config.LABELS_DIR,
+            min_records_per_label=args.activity_min_records_per_label,
+        )
+        if activity_model.get("eligible"):
+            logger.info(
+                "Loaded activity classifier for labels: %s",
+                ", ".join(activity_model["labels"]),
+            )
+        else:
+            logger.warning(
+                "Activity classifier is disabled: %s",
+                activity_model.get("reason", "model is not eligible"),
+            )
 
     # Storage for run data
     raw_records = []  # List of raw dicts: [timestamp, rssi, csi_0..5, raw_signal]
@@ -154,6 +188,13 @@ def run_app():
                 logger.info(
                     f"Features: Outlier Ratio={features['outlier_ratio']}, Signal Std={features['signal_std']}"
                 )
+                activity_prediction = classify_activity_window(features, activity_model)
+                if activity_prediction:
+                    logger.info(
+                        "Activity prediction: label=%s distance=%.4f",
+                        activity_prediction["label"],
+                        activity_prediction["distance"],
+                    )
 
                 # Query Gemma Advisor
                 decision = query_gemma_advisor(features)
@@ -212,6 +253,13 @@ def run_app():
     if len(window_signal) > 0:
         logger.info(f"Processing final window: {len(window_signal)} samples.")
         features = extract_features(window_rssi, window_signal, missing_count)
+        activity_prediction = classify_activity_window(features, activity_model)
+        if activity_prediction:
+            logger.info(
+                "Activity prediction: label=%s distance=%.4f",
+                activity_prediction["label"],
+                activity_prediction["distance"],
+            )
         decision = query_gemma_advisor(features)
         decision["timestamp"] = int(time.time() * 1000)
         decision["window_index"] = len(decisions)

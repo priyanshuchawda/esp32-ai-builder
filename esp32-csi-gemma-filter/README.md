@@ -130,6 +130,12 @@ Build the local activity model from the same labels:
 python python-engine/activity_classifier.py
 ```
 
+Once at least two labels have enough rows, enable live prediction during a run:
+
+```bash
+python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --activity-classifier --advisor-provider rules
+```
+
 ### D. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 
