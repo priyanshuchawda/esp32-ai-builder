@@ -1,6 +1,9 @@
 from unittest.mock import Mock
 
+import requests
+
 from presence_alerts import (
+    PresenceThresholds,
     TelegramPresenceAlerter,
     TelegramSettings,
     build_presence_message,
@@ -31,6 +34,18 @@ def test_detect_human_presence_requires_enough_samples_and_motion():
     assert detect_human_presence(quiet_features) is False
     assert detect_human_presence(short_window) is False
     assert detect_human_presence(active_features) is True
+
+
+def test_detect_human_presence_supports_two_second_serial_window():
+    serial_window_features = {
+        "sample_count": 19,
+        "signal_variance": 50.1527,
+        "signal_std": 7.0819,
+        "rssi_std": 1.2,
+    }
+    thresholds = PresenceThresholds(min_samples=15)
+
+    assert detect_human_presence(serial_window_features, thresholds) is True
 
 
 def test_build_presence_message_summarizes_signal_context():
@@ -82,3 +97,19 @@ def test_telegram_alerter_posts_message_and_honors_cooldown():
     assert first_call.args[0] == "https://api.telegram.org/bottoken/sendMessage"
     assert first_call.kwargs["json"]["chat_id"] == "123"
     assert "Human presence likely detected" in first_call.kwargs["json"]["text"]
+
+
+def test_telegram_alerter_does_not_log_bot_token_on_failure(caplog):
+    response = Mock()
+    response.status_code = 403
+    response.reason = "Forbidden"
+    response.raise_for_status.side_effect = requests.HTTPError(
+        "403 Client Error: Forbidden for url: https://api.telegram.org/bottoken/sendMessage"
+    )
+    post = Mock(return_value=response)
+    settings = TelegramSettings(enabled=True, bot_token="secret-token", chat_id="123")
+    alerter = TelegramPresenceAlerter(settings, post=post)
+
+    assert alerter.send_presence_alert({"signal_variance": 2.0}, {"filter": "median"}) is False
+    assert "secret-token" not in caplog.text
+    assert "api.telegram.org/bot" not in caplog.text

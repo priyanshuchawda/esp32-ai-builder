@@ -82,6 +82,12 @@ Connects to the ESP32 Dev Module and reads live signals.
 python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 20
 ```
 
+The root PlatformIO firmware emits parser-compatible rows:
+
+```text
+timestamp,rssi,csi_0,csi_1,csi_2,csi_3,csi_4,csi_5
+```
+
 ### C. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 

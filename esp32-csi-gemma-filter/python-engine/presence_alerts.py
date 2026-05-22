@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PresenceThresholds:
-    min_samples: int = 30
+    min_samples: int = 15
     signal_variance: float = 1.0
     signal_std: float = 0.8
     rssi_std: float = 0.8
@@ -61,7 +61,7 @@ def load_local_env() -> None:
 def thresholds_from_env() -> PresenceThresholds:
     load_local_env()
     return PresenceThresholds(
-        min_samples=_env_int("HUMAN_MIN_SAMPLES", default=30),
+        min_samples=_env_int("HUMAN_MIN_SAMPLES", default=15),
         signal_variance=_env_float("HUMAN_SIGNAL_VARIANCE_THRESHOLD", default=1.0),
         signal_std=_env_float("HUMAN_SIGNAL_STD_THRESHOLD", default=0.8),
         rssi_std=_env_float("HUMAN_RSSI_STD_THRESHOLD", default=0.8),
@@ -144,8 +144,21 @@ class TelegramPresenceAlerter:
                 timeout=self.settings.timeout_seconds,
             )
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            response = exc.response
+            status_code = getattr(response, "status_code", "unknown")
+            reason = getattr(response, "reason", "HTTP error")
+            logger.warning(
+                "Failed to send Telegram human-presence alert: status=%s reason=%s",
+                status_code,
+                reason,
+            )
+            return False
         except requests.RequestException as exc:
-            logger.warning("Failed to send Telegram human-presence alert: %s", exc)
+            logger.warning(
+                "Failed to send Telegram human-presence alert: %s",
+                exc.__class__.__name__,
+            )
             return False
 
         self._last_sent_at = current_time
