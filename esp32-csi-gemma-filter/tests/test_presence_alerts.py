@@ -12,6 +12,7 @@ from presence_alerts import (
 
 
 def test_detect_human_presence_requires_enough_samples_and_motion():
+    thresholds = PresenceThresholds()
     quiet_features = {
         "sample_count": 120,
         "signal_variance": 0.04,
@@ -31,9 +32,9 @@ def test_detect_human_presence_requires_enough_samples_and_motion():
         "rssi_std": 2.0,
     }
 
-    assert detect_human_presence(quiet_features) is False
-    assert detect_human_presence(short_window) is False
-    assert detect_human_presence(active_features) is True
+    assert detect_human_presence(quiet_features, thresholds) is False
+    assert detect_human_presence(short_window, thresholds) is False
+    assert detect_human_presence(active_features, thresholds) is True
 
 
 def test_detect_human_presence_supports_two_second_serial_window():

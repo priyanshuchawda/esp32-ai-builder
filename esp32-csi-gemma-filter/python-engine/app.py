@@ -14,6 +14,7 @@ from csi_parser import parse_line
 from features import extract_features
 from filters import apply_filter
 from gemma_advisor import query_gemma_advisor
+from labeling import build_labeled_window_record, normalize_label, write_labeled_window
 from presence_alerts import TelegramPresenceAlerter, detect_human_presence
 from plot_signal import plot_raw_vs_filtered
 
@@ -53,11 +54,26 @@ def parse_args():
         default=20,
         help="Duration of the run in seconds (default: 20)",
     )
+    parser.add_argument(
+        "--label",
+        default=None,
+        help="Optional activity label to save per-window calibration records, e.g. empty, walking, sitting",
+    )
+    parser.add_argument(
+        "--advisor-provider",
+        choices=["gemini", "ollama", "rules"],
+        default=None,
+        help="Override the advisor provider for this run. Use 'rules' for fast calibration capture.",
+    )
     return parser.parse_args()
 
 
 def run_app():
     args = parse_args()
+    if args.label:
+        args.label = normalize_label(args.label)
+    if args.advisor_provider:
+        config.GEMMA_ADVISOR_PROVIDER = args.advisor_provider
     session_id = f"session_{datetime.now().strftime('%Y_%m_%d_%H%M%S')}"
     logger.info(f"Starting {args.mode} mode. Session ID: {session_id}")
     presence_alerter = TelegramPresenceAlerter.from_env()
@@ -144,6 +160,17 @@ def run_app():
                 decision["timestamp"] = int(time.time() * 1000)
                 decision["window_index"] = len(decisions)
                 decisions.append(decision)
+                if args.label:
+                    label_record = build_labeled_window_record(
+                        label=args.label,
+                        session_id=session_id,
+                        mode=args.mode,
+                        window_index=decision["window_index"],
+                        features=features,
+                        decision=decision,
+                    )
+                    label_path = write_labeled_window(config.LABELS_DIR, label_record)
+                    logger.info(f"Saved labeled window to {label_path}")
                 if detect_human_presence(features):
                     presence_alerter.send_presence_alert(features, decision)
 
@@ -189,6 +216,17 @@ def run_app():
         decision["timestamp"] = int(time.time() * 1000)
         decision["window_index"] = len(decisions)
         decisions.append(decision)
+        if args.label:
+            label_record = build_labeled_window_record(
+                label=args.label,
+                session_id=session_id,
+                mode=args.mode,
+                window_index=decision["window_index"],
+                features=features,
+                decision=decision,
+            )
+            label_path = write_labeled_window(config.LABELS_DIR, label_record)
+            logger.info(f"Saved labeled window to {label_path}")
         if detect_human_presence(features):
             presence_alerter.send_presence_alert(features, decision)
 

@@ -18,6 +18,15 @@ Do not commit real tokens. Copy `esp32-csi-gemma-filter/.env.example` to a local
 - `TELEGRAM_CHAT_ID`: Your chat ID after you send `/start` to the bot.
 - `HUMAN_ALERT_ENABLED=true`: Enables Telegram alerts when human presence is detected.
 
+## Calibration
+
+Record labeled CSI feature windows for later activity classification:
+
+```powershell
+cd esp32-csi-gemma-filter
+uv run --with-requirements python-engine/requirements.txt python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --label walking --advisor-provider rules
+```
+
 ## Test
 
 ```powershell

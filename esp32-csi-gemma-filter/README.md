@@ -103,7 +103,21 @@ Classic ESP32 boards only support 2.4 GHz Wi-Fi. Use the 2.4 GHz SSID for
 with `#`, and the firmware automatically falls back to simulated CSV rows if
 Wi-Fi or CSI frames are unavailable.
 
-### C. Telegram Human-Presence Alerts
+### C. Labeled Calibration Data
+Use `--label` to record per-window feature rows for future activity
+classification experiments:
+
+```bash
+python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --label empty --advisor-provider rules
+python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --label walking --advisor-provider rules
+python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --label sitting --advisor-provider rules
+```
+
+Labels are normalized to safe filenames and appended as JSONL under
+`python-engine/data/labels/<label>.jsonl`.
+The `rules` advisor avoids slow network calls while collecting calibration data.
+
+### D. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 
 ```env

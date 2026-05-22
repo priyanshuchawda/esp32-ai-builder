@@ -226,6 +226,9 @@ def query_ollama_advisor(features: dict) -> dict:
 
 
 def query_gemma_advisor(features: dict) -> dict:
+    if config.GEMMA_ADVISOR_PROVIDER == "rules":
+        logger.info("Using local rule-based advisor.")
+        return get_rule_based_decision(features)
     if config.GEMMA_ADVISOR_PROVIDER == "ollama":
         return query_ollama_advisor(features)
     return query_gemini_advisor(features)

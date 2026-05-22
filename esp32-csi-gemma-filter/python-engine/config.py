@@ -7,6 +7,7 @@ RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 FILTERED_DATA_DIR = os.path.join(DATA_DIR, "filtered")
 DECISIONS_DIR = os.path.join(DATA_DIR, "decisions")
 PLOTS_DIR = os.path.join(DATA_DIR, "plots")
+LABELS_DIR = os.path.join(DATA_DIR, "labels")
 
 try:
     from dotenv import load_dotenv
@@ -51,5 +52,5 @@ FALLBACK_HIGH_STD_THRESHOLD = 2.0
 FALLBACK_NOISE_STD_THRESHOLD = 0.2
 
 # Ensure directories exist
-for directory in [RAW_DATA_DIR, FILTERED_DATA_DIR, DECISIONS_DIR, PLOTS_DIR]:
+for directory in [RAW_DATA_DIR, FILTERED_DATA_DIR, DECISIONS_DIR, PLOTS_DIR, LABELS_DIR]:
     os.makedirs(directory, exist_ok=True)
