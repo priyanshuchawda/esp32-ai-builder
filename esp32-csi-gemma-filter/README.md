@@ -98,6 +98,11 @@ after flashing the real CSI mode, keep the ESP32 close to the router and create
 traffic from another device on the same network, such as a continuous ping or
 video stream.
 
+Classic ESP32 boards only support 2.4 GHz Wi-Fi. Use the 2.4 GHz SSID for
+`WIFI_SSID`; 5 GHz-only networks will not connect. Firmware status lines start
+with `#`, and the firmware automatically falls back to simulated CSV rows if
+Wi-Fi or CSI frames are unavailable.
+
 ### C. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 

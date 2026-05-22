@@ -13,6 +13,9 @@ def parse_line(line: str) -> dict | None:
     if not line:
         return None
 
+    if line.strip().startswith("#"):
+        return None
+
     # Split by comma
     parts = line.strip().split(",")
 
