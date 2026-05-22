@@ -33,6 +33,9 @@ Summarize collected labels and run the local baseline evaluator:
 uv run --with-requirements python-engine/requirements.txt python python-engine/calibration_report.py
 ```
 
+The report includes readiness guidance for the default target labels:
+`empty`, `sitting`, and `walking`.
+
 Build the local activity model from collected labels:
 
 ```powershell

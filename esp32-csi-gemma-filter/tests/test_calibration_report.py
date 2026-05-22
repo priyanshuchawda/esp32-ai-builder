@@ -1,6 +1,7 @@
 import json
 
 from calibration_report import (
+    build_readiness,
     evaluate_nearest_centroid,
     load_labeled_windows,
     summarize_labels,
@@ -91,3 +92,41 @@ def test_evaluate_nearest_centroid_requires_two_labels():
 
     assert report["eligible"] is False
     assert "at least two labels" in report["reason"]
+
+
+def test_build_readiness_reports_missing_target_labels():
+    records = [
+        _record("walking", 40.0, 4.0, 0),
+        _record("walking", 41.0, 4.1, 1),
+        _record("walking", 42.0, 4.2, 2),
+    ]
+
+    readiness = build_readiness(
+        records,
+        target_labels=["empty", "sitting", "walking"],
+        min_records_per_label=3,
+    )
+
+    assert readiness["ready"] is False
+    assert readiness["labels"]["walking"]["ready"] is True
+    assert readiness["labels"]["empty"]["needed"] == 3
+    assert readiness["labels"]["sitting"]["needed"] == 3
+    assert readiness["next_labels"] == ["empty", "sitting"]
+
+
+def test_build_readiness_reports_ready_when_targets_have_enough_records():
+    records = [
+        _record("empty", 10.0, 0.2, 0),
+        _record("empty", 11.0, 0.3, 1),
+        _record("sitting", 20.0, 1.0, 0),
+        _record("sitting", 21.0, 1.1, 1),
+    ]
+
+    readiness = build_readiness(
+        records,
+        target_labels=["empty", "sitting"],
+        min_records_per_label=2,
+    )
+
+    assert readiness["ready"] is True
+    assert readiness["next_labels"] == []
