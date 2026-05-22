@@ -33,6 +33,12 @@ Summarize collected labels and run the local baseline evaluator:
 uv run --with-requirements python-engine/requirements.txt python python-engine/calibration_report.py
 ```
 
+Build the local activity model from collected labels:
+
+```powershell
+uv run --with-requirements python-engine/requirements.txt python python-engine/activity_classifier.py
+```
+
 ## Test
 
 ```powershell
