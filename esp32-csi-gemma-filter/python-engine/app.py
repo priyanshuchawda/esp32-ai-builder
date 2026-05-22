@@ -9,6 +9,7 @@ import numpy as np
 
 import config
 from activity_classifier import load_activity_model, predict_activity
+from calibration_report import DEFAULT_MIN_SAMPLES_PER_WINDOW
 from simulator import generate_noisy_data
 from serial_reader import SerialReader
 from csi_parser import parse_line
@@ -61,6 +62,12 @@ def parse_args():
         help="Optional activity label to save per-window calibration records, e.g. empty, walking, sitting",
     )
     parser.add_argument(
+        "--label-min-samples",
+        type=int,
+        default=DEFAULT_MIN_SAMPLES_PER_WINDOW,
+        help="Minimum samples required before a labeled calibration window is saved.",
+    )
+    parser.add_argument(
         "--advisor-provider",
         choices=["gemini", "ollama", "rules"],
         default=None,
@@ -84,6 +91,13 @@ def classify_activity_window(features: dict, activity_model: dict | None) -> dic
     if not activity_model or not activity_model.get("eligible"):
         return None
     return predict_activity(features, activity_model)
+
+
+def should_save_labeled_window(features: dict, min_samples: int) -> bool:
+    try:
+        return int(features.get("sample_count", 0)) >= min_samples
+    except (TypeError, ValueError):
+        return False
 
 
 def run_app():
@@ -201,7 +215,10 @@ def run_app():
                 decision["timestamp"] = int(time.time() * 1000)
                 decision["window_index"] = len(decisions)
                 decisions.append(decision)
-                if args.label:
+                if args.label and should_save_labeled_window(
+                    features,
+                    args.label_min_samples,
+                ):
                     label_record = build_labeled_window_record(
                         label=args.label,
                         session_id=session_id,
@@ -212,6 +229,12 @@ def run_app():
                     )
                     label_path = write_labeled_window(config.LABELS_DIR, label_record)
                     logger.info(f"Saved labeled window to {label_path}")
+                elif args.label:
+                    logger.info(
+                        "Skipping labeled window with %s samples; minimum is %s.",
+                        features.get("sample_count", 0),
+                        args.label_min_samples,
+                    )
                 if detect_human_presence(features):
                     presence_alerter.send_presence_alert(features, decision)
 
@@ -264,7 +287,7 @@ def run_app():
         decision["timestamp"] = int(time.time() * 1000)
         decision["window_index"] = len(decisions)
         decisions.append(decision)
-        if args.label:
+        if args.label and should_save_labeled_window(features, args.label_min_samples):
             label_record = build_labeled_window_record(
                 label=args.label,
                 session_id=session_id,
@@ -275,6 +298,12 @@ def run_app():
             )
             label_path = write_labeled_window(config.LABELS_DIR, label_record)
             logger.info(f"Saved labeled window to {label_path}")
+        elif args.label:
+            logger.info(
+                "Skipping labeled window with %s samples; minimum is %s.",
+                features.get("sample_count", 0),
+                args.label_min_samples,
+            )
         if detect_human_presence(features):
             presence_alerter.send_presence_alert(features, decision)
 

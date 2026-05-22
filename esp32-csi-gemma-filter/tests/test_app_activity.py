@@ -1,8 +1,14 @@
-from app import classify_activity_window
+from app import classify_activity_window, should_save_labeled_window
 
 
 def test_classify_activity_window_skips_when_model_missing():
     assert classify_activity_window({"signal_mean": 10.0}, None) is None
+
+
+def test_should_save_labeled_window_requires_minimum_samples():
+    assert should_save_labeled_window({"sample_count": 21}, 10) is True
+    assert should_save_labeled_window({"sample_count": 4}, 10) is False
+    assert should_save_labeled_window({"sample_count": "bad"}, 10) is False
 
 
 def test_classify_activity_window_returns_prediction_for_eligible_model():

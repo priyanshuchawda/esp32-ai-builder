@@ -116,6 +116,8 @@ python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 3
 Labels are normalized to safe filenames and appended as JSONL under
 `python-engine/data/labels/<label>.jsonl`.
 The `rules` advisor avoids slow network calls while collecting calibration data.
+Sparse windows with fewer than 10 CSI samples are skipped by default; use
+`--label-min-samples` to change that threshold.
 
 After collecting at least two labels, summarize the dataset and run the local
 nearest-centroid baseline:
