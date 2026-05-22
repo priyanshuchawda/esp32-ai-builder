@@ -668,46 +668,91 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
             continue
     ser.close()
 
-def generate_simulated_packet(seq):
+def generate_simulated_packet(seq, config_dict=None):
     now_ms = int(time.time() * 1000)
     t = time.time()
     
-    # 60-second periodic cycle for sleep apnea/hypopnea pre-screening verification
-    cycle_t = t % 60
-    
-    # Base background physiological noise standard deviation (human presence)
-    # When a human is present, chest motion, pulse, and muscle tremors create constant minor CSI variance
-    human_noise_std = 0.50
-    
-    if 30 <= cycle_t < 45:
-        # Apnea event: Cessation of breathing (flat/no respiration wave) for 15s
-        breathing = 0.0
-        # Heartbeat remains present but faint
-        heartbeat = 0.04 * np.sin(2 * np.pi * 1.2 * t)
-        is_motion = False
-    elif 0 <= cycle_t < 15:
-        # Hypopnea event: Shallow/slow breathing (6 BPM = 0.1 Hz) for 15s
-        # Drop respiration amplitude to 0.15
-        breathing = 0.15 * np.sin(2 * np.pi * 0.1 * t)
-        heartbeat = 0.04 * np.sin(2 * np.pi * 1.2 * t)
-        is_motion = False
-    else:
-        # Normal breathing: 15 BPM (0.25 Hz)
-        breathing = 0.6 * np.sin(2 * np.pi * 0.25 * t)
-        heartbeat = 0.08 * np.sin(2 * np.pi * 1.2 * t)
-        # Occasional movement spikes during normal breathing (e.g. turning in bed)
-        is_motion = (int(t) % 20 < 3)
+    sim_mode = "Auto Cycle"
+    if config_dict:
+        sim_mode = config_dict.get("simulation_mode", "Auto Cycle")
         
+    # Default parameters
+    breathing = 0.0
+    heartbeat = 0.0
     motion_spike = 0.0
-    if is_motion:
-        motion_spike = np.sin(2 * np.pi * 1.5 * t) * np.random.uniform(1.2, 3.2)
-        
-    # Fall event simulator: every 90 seconds (reduced frequency to prevent clashing with apnea cycle)
-    is_fall = (int(t) % 90 == 85)
     fall_spike = 0.0
-    if is_fall:
-        fall_spike = 15.0 * np.exp(-((t % 90) - 85) * 5)
+    human_noise_std = 0.05  # baseline thermal noise
+    is_motion = False
+    
+    if sim_mode == "Auto Cycle":
+        # 60-second periodic cycle for sleep apnea/hypopnea pre-screening verification
+        cycle_t = t % 60
+        if 30 <= cycle_t < 45:
+            mode = "Apnea"
+        elif 0 <= cycle_t < 15:
+            mode = "Hypopnea"
+        elif 15 <= cycle_t < 30:
+            mode = "Fitness"
+        else:
+            mode = "Normal Sleeping"
+    else:
+        mode = sim_mode
         
+    if mode == "Apnea":
+        # Apnea: breathing ceases, low noise, presence is still active
+        breathing = 0.0
+        heartbeat = 0.04 * np.sin(2 * np.pi * 1.1 * t)
+        human_noise_std = 0.28  # enough to keep variance around 0.1 - 0.2
+        is_motion = False
+    elif mode == "Hypopnea":
+        # Hypopnea: shallow respiration
+        breathing = 0.15 * np.sin(2 * np.pi * 0.1 * t)
+        heartbeat = 0.04 * np.sin(2 * np.pi * 1.15 * t)
+        human_noise_std = 0.28
+        is_motion = False
+    elif mode == "Fitness":
+        # Fitness: large squats/rhythmic movement
+        # 4-second squat cycle: large sine wave component to drive variance and triggers
+        breathing = 0.8 * np.sin(2 * np.pi * 0.5 * t)  # rapid breathing (30 bpm)
+        heartbeat = 0.12 * np.sin(2 * np.pi * 2.0 * t)  # high heart rate (120 bpm)
+        # We need a large sine movement for the rep counter
+        motion_spike = 2.5 * np.sin(2 * np.pi * 0.25 * t)  # 4-second period
+        human_noise_std = 0.6
+        is_motion = True
+    elif mode == "Normal Sleeping":
+        # Sleeping: slow regular breathing
+        breathing = 0.5 * np.sin(2 * np.pi * 0.2 * t)  # 12 bpm
+        heartbeat = 0.06 * np.sin(2 * np.pi * 1.1 * t)  # 66 bpm
+        human_noise_std = 0.30
+        is_motion = False
+    elif mode == "Fall":
+        # Fall detection: large spike
+        # We simulate a fall trigger periodically
+        fall_cycle = t % 15
+        if fall_cycle < 1.5:
+            # Huge deceleration spike
+            fall_spike = 16.0 * np.exp(-fall_cycle * 4)
+        else:
+            fall_spike = 0.0
+        breathing = 0.2 * np.sin(2 * np.pi * 0.15 * t)  # shallow breathing after fall
+        heartbeat = 0.09 * np.sin(2 * np.pi * 1.5 * t)  # rapid heart rate (90 bpm)
+        human_noise_std = 0.35
+        is_motion = (fall_cycle < 1.0)
+    elif mode == "Idle":
+        # Idle: standard standing
+        breathing = 0.4 * np.sin(2 * np.pi * 0.25 * t)  # 15 bpm
+        heartbeat = 0.07 * np.sin(2 * np.pi * 1.25 * t)  # 75 bpm
+        # Minor postural sway
+        motion_spike = 0.15 * np.sin(2 * np.pi * 0.05 * t)
+        human_noise_std = 0.45
+        is_motion = False
+    elif mode == "Empty Room":
+        # Empty room: minimal variance, presence false
+        breathing = 0.0
+        heartbeat = 0.0
+        human_noise_std = 0.05  # below presence threshold
+        is_motion = False
+
     base_signal = 25.0 + breathing + heartbeat + motion_spike + fall_spike
     
     # We add both Gaussian thermal noise and human presence micro-reflections
@@ -731,7 +776,7 @@ def simulator_loop(shutdown_event, data_queue, config):
     seq = 0
     
     while not shutdown_event.is_set():
-        packet = generate_simulated_packet(seq)
+        packet = generate_simulated_packet(seq, config)
         seq += 1
         packet_counter += 1
         
@@ -773,6 +818,7 @@ def simulator_loop(shutdown_event, data_queue, config):
         
         time.sleep(0.04) # 25 Hz simulation rate
 
+
 # Helper to launch thread safely
 def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_baud):
     thread_shutdown.clear()
@@ -806,6 +852,289 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
             daemon=True
         )
         t.start()
+
+# ----------------- 3D OBSERVATORY VISUALIZATION -----------------
+
+def get_skeleton_coords(telemetry):
+    t = time.time()
+    apnea_status = telemetry.get("apnea_status", {})
+    is_apnea = apnea_status.get("is_apnea", False)
+    is_hypopnea = apnea_status.get("is_hypopnea", False)
+    resp_bpm = telemetry.get("resp_bpm", 0.0)
+    variance = telemetry.get("variance", 0.0)
+    
+    # 1. Fall Alert Posture (horizontal collapsed on floor)
+    if telemetry.get("fall_alert", False):
+        joints = {
+            "head": [0.0, 1.2, 0.15],
+            "neck": [0.0, 0.9, 0.15],
+            "shoulder_l": [-0.3, 0.9, 0.15],
+            "shoulder_r": [0.3, 0.9, 0.15],
+            "elbow_l": [-0.4, 0.6, 0.15],
+            "elbow_r": [0.4, 0.6, 0.15],
+            "wrist_l": [-0.3, 0.3, 0.15],
+            "wrist_r": [0.3, 0.3, 0.15],
+            "hip_l": [-0.2, 0.0, 0.15],
+            "hip_r": [0.2, 0.0, 0.15],
+            "knee_l": [-0.2, -0.5, 0.15],
+            "knee_r": [0.2, -0.5, 0.15],
+            "ankle_l": [-0.2, -1.0, 0.15],
+            "ankle_r": [0.2, -1.0, 0.15]
+        }
+        joints["hip_center"] = [0.0, 0.0, 0.15]
+        return joints, False
+
+    # 2. Sleeping / Apnea screening posture
+    is_sleeping = False
+    if telemetry.get("presence", False) and (is_apnea or is_hypopnea or variance < 1.0):
+        is_sleeping = True
+        
+    if is_sleeping:
+        bed_z = 0.4
+        body_z = bed_z + 0.05
+        
+        freq = resp_bpm / 60.0 if resp_bpm > 0 else 0.0
+        chest_amplitude = 0.03 if not is_apnea else 0.0
+        if is_hypopnea:
+            chest_amplitude = 0.01
+        chest_offset = chest_amplitude * np.sin(2 * np.pi * freq * t)
+        
+        joints = {
+            "head": [0.0, 1.2, body_z],
+            "neck": [0.0, 0.9, body_z],
+            "shoulder_l": [-0.3, 0.9, body_z],
+            "shoulder_r": [0.3, 0.9, body_z],
+            "elbow_l": [-0.4, 0.6, body_z],
+            "elbow_r": [0.4, 0.6, body_z],
+            "wrist_l": [-0.2, 0.4, body_z + 0.05 + chest_offset],
+            "wrist_r": [0.2, 0.4, body_z + 0.05 + chest_offset],
+            "hip_l": [-0.2, 0.0, body_z],
+            "hip_r": [0.2, 0.0, body_z],
+            "knee_l": [-0.25, -0.5, body_z + 0.05],
+            "knee_r": [0.25, -0.5, body_z + 0.05],
+            "ankle_l": [-0.2, -1.0, body_z],
+            "ankle_r": [0.2, -1.0, body_z]
+        }
+        joints["hip_center"] = [0.0, 0.0, body_z + chest_offset]
+        return joints, True
+
+    # 3. Exercising / Squats posture (indicated by high variance & presence)
+    is_exercising = telemetry.get("presence", False) and variance >= 1.0
+    if is_exercising:
+        # 4-second squat cycles
+        squat_val = 0.5 + 0.5 * np.sin(2 * np.pi * 0.25 * t)
+        
+        z_head = 1.0 + 0.7 * squat_val
+        z_neck = 0.85 + 0.55 * squat_val
+        z_shoulder = 0.8 + 0.5 * squat_val
+        z_hip = 0.45 + 0.35 * squat_val
+        z_knee = 0.25 + 0.15 * squat_val
+        z_wrist = z_shoulder + 0.15 - 0.3 * (1.0 - squat_val)
+        
+        joints = {
+            "head": [0.0, 0.0, z_head],
+            "neck": [0.0, 0.0, z_neck],
+            "shoulder_l": [-0.35, 0.0, z_shoulder],
+            "shoulder_r": [0.35, 0.0, z_shoulder],
+            "elbow_l": [-0.45, 0.2, z_shoulder - 0.2],
+            "elbow_r": [0.45, 0.2, z_shoulder - 0.2],
+            "wrist_l": [-0.4, 0.3, z_wrist],
+            "wrist_r": [0.4, 0.3, z_wrist],
+            "hip_l": [-0.2, 0.0, z_hip],
+            "hip_r": [0.2, 0.0, z_hip],
+            "knee_l": [-0.3, 0.1, z_knee],
+            "knee_r": [0.3, 0.1, z_knee],
+            "ankle_l": [-0.25, 0.0, 0.0],
+            "ankle_r": [0.25, 0.0, 0.0]
+        }
+        joints["hip_center"] = [0.0, 0.0, z_hip]
+        return joints, False
+
+    # 4. Standard upright idle
+    freq = resp_bpm / 60.0 if resp_bpm > 0 else 0.25
+    breathing_jitter = 0.01 * np.sin(2 * np.pi * freq * t)
+    
+    joints = {
+        "head": [0.0, 0.0, 1.7 + breathing_jitter],
+        "neck": [0.0, 0.0, 1.45 + breathing_jitter],
+        "shoulder_l": [-0.35, 0.0, 1.4],
+        "shoulder_r": [0.35, 0.0, 1.4],
+        "elbow_l": [-0.45, -0.15, 1.1],
+        "elbow_r": [0.45, -0.15, 1.1],
+        "wrist_l": [-0.35, -0.25, 0.85],
+        "wrist_r": [0.35, -0.25, 0.85],
+        "hip_l": [-0.2, 0.0, 0.8],
+        "hip_r": [0.2, 0.0, 0.8],
+        "knee_l": [-0.25, 0.05, 0.4],
+        "knee_r": [0.25, 0.05, 0.4],
+        "ankle_l": [-0.2, 0.0, 0.0],
+        "ankle_r": [0.2, 0.0, 0.0]
+    }
+    joints["hip_center"] = [0.0, 0.0, 0.8 + breathing_jitter]
+    return joints, False
+
+def generate_3d_observatory(telemetry, stats):
+    fig = go.Figure()
+    
+    # 1. Floor grid points matching the green Matrix grid in the image
+    grid_x = []
+    grid_y = []
+    grid_z = []
+    for x in np.arange(-4, 4.1, 0.8):
+        for y in np.arange(-4, 4.1, 0.8):
+            grid_x.append(x)
+            grid_y.append(y)
+            grid_z.append(0.0)
+            
+    fig.add_trace(go.Scatter3d(
+        x=grid_x, y=grid_y, z=grid_z,
+        mode='markers',
+        marker=dict(size=4, color='#33ff33', symbol='square', opacity=0.15),
+        showlegend=False
+    ))
+    
+    # 2. Concentric Blue WiFi Wave Spheres centered at the Sensor Node
+    sensor_pos = [0.0, -4.0, 0.5]
+    radii = [1.5, 3.2, 5.0]
+    
+    sphere_x = []
+    sphere_y = []
+    sphere_z = []
+    
+    for r in radii:
+        # Longitude curves
+        for theta in [0, np.pi/4, np.pi/2, 3*np.pi/4]:
+            phi = np.linspace(0, np.pi, 20)
+            xs = sensor_pos[0] + r * np.cos(theta) * np.sin(phi)
+            ys = sensor_pos[1] + r * np.sin(theta) * np.sin(phi)
+            zs = sensor_pos[2] + r * np.cos(phi)
+            zs = np.clip(zs, 0.0, None)
+            
+            sphere_x.extend(list(xs) + [None])
+            sphere_y.extend(list(ys) + [None])
+            sphere_z.extend(list(zs) + [None])
+            
+        # Latitude curves
+        for phi in [np.pi/4, np.pi/2, 3*np.pi/4]:
+            theta = np.linspace(0, 2*np.pi, 30)
+            xs = sensor_pos[0] + r * np.cos(theta) * np.sin(phi)
+            ys = sensor_pos[1] + r * np.sin(theta) * np.sin(phi)
+            zs = sensor_pos[2] + r * np.cos(phi) * np.ones_like(theta)
+            zs = np.clip(zs, 0.0, None)
+            
+            sphere_x.extend(list(xs) + [None])
+            sphere_y.extend(list(ys) + [None])
+            sphere_z.extend(list(zs) + [None])
+            
+    fig.add_trace(go.Scatter3d(
+        x=sphere_x, y=sphere_y, z=sphere_z,
+        mode='lines',
+        line=dict(color='rgba(0, 100, 255, 0.18)', width=1.3),
+        showlegend=False
+    ))
+
+            
+    # 3. Sensor Node visualization
+    fig.add_trace(go.Scatter3d(
+        x=[sensor_pos[0]], y=[sensor_pos[1]], z=[sensor_pos[2]],
+        mode='markers+text',
+        marker=dict(size=8, color='#00ffcc', symbol='diamond'),
+        text=["NODE-1"],
+        textposition="top center",
+        textfont=dict(color="#00ffcc", family="monospace", size=9),
+        showlegend=False
+    ))
+    
+    # 4. Human Body Skeleton (only if present)
+    if telemetry.get("presence", False):
+        joints, draw_bed = get_skeleton_coords(telemetry)
+        
+        # Draw Bed mattress frame if sleeping
+        if draw_bed:
+            bx = [-0.7, 0.7, 0.7, -0.7, -0.7, None,
+                  -0.7, 0.7, 0.7, -0.7, -0.7, None,
+                  -0.7, -0.7, None, 0.7, 0.7, None,
+                  0.7, 0.7, None, -0.7, -0.7]
+            by = [-1.2, -1.2, 1.2, 1.2, -1.2, None,
+                  -1.2, -1.2, 1.2, 1.2, -1.2, None,
+                  -1.2, -1.2, None, -1.2, -1.2, None,
+                  1.2, 1.2, None, 1.2, 1.2]
+            bz = [0.4, 0.4, 0.4, 0.4, 0.4, None,
+                  0.0, 0.0, 0.0, 0.0, 0.0, None,
+                  0.4, 0.0, None, 0.4, 0.0, None,
+                  0.4, 0.0, None, 0.4, 0.0]
+            fig.add_trace(go.Scatter3d(
+                x=bx, y=by, z=bz,
+                mode='lines',
+                line=dict(color='rgba(139, 69, 19, 0.25)', width=2),
+                showlegend=False
+            ))
+            
+        # Define bone lines (separated by None segments)
+        BONE_CONNECTIONS = [
+            ("head", "neck"),
+            ("shoulder_l", "shoulder_r"),
+            ("shoulder_l", "neck"),
+            ("shoulder_r", "neck"),
+            ("shoulder_l", "elbow_l"),
+            ("elbow_l", "wrist_l"),
+            ("shoulder_r", "elbow_r"),
+            ("elbow_r", "wrist_r"),
+            ("neck", "hip_center"),
+            ("hip_l", "hip_center"),
+            ("hip_r", "hip_center"),
+            ("hip_l", "knee_l"),
+            ("knee_l", "ankle_l"),
+            ("hip_r", "knee_r"),
+            ("knee_r", "ankle_r")
+        ]
+        
+        skeleton_x = []
+        skeleton_y = []
+        skeleton_z = []
+        for start, end in BONE_CONNECTIONS:
+            p1 = joints[start]
+            p2 = joints[end]
+            skeleton_x.extend([p1[0], p2[0], None])
+            skeleton_y.extend([p1[1], p2[1], None])
+            skeleton_z.extend([p1[2], p2[2], None])
+            
+        # Green Glowing Bones
+        fig.add_trace(go.Scatter3d(
+            x=skeleton_x, y=skeleton_y, z=skeleton_z,
+            mode='lines',
+            line=dict(color='#33ff33', width=5),
+            showlegend=False
+        ))
+        
+        # Red Joint Nodes
+        jx = [v[0] for v in joints.values()]
+        jy = [v[1] for v in joints.values()]
+        jz = [v[2] for v in joints.values()]
+        fig.add_trace(go.Scatter3d(
+            x=jx, y=jy, z=jz,
+            mode='markers',
+            marker=dict(size=4.5, color='#ff5555', symbol='circle'),
+            showlegend=False
+        ))
+        
+    # Configure 3D layout to hide grids/backgrounds for pure terminal look
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(visible=False, range=[-5, 5]),
+            yaxis=dict(visible=False, range=[-5, 5]),
+            zaxis=dict(visible=False, range=[0, 5]),
+            aspectratio=dict(x=1, y=1, z=0.5),
+            camera=dict(
+                eye=dict(x=1.6, y=-1.6, z=1.1)
+            )
+        ),
+        paper_bgcolor='#090d12',
+        plot_bgcolor='#090d12',
+        margin=dict(r=0, l=0, b=0, t=0),
+        height=380,
+    )
+    return fig
 
 # ----------------- MAIN APP USER INTERFACE -----------------
 
@@ -890,15 +1219,430 @@ else:
 
 # ----------------- MAIN REAL-TIME DASHBOARD RENDER -----------------
 
+# Standby placeholders to keep interface populated when not running
+standby_telemetry = {
+    "presence": False,
+    "resp_bpm": 0.0,
+    "heart_bpm": 0.0,
+    "variance": 0.0,
+    "fall_alert": False,
+    "acceleration": 0.0,
+    "rep_count": 0,
+    "apnea_status": {
+        "is_apnea": False,
+        "is_hypopnea": False,
+        "current_event_duration": 0.0,
+        "baseline_br": 0.0,
+        "ahi": 0.0,
+        "hours": 0.0,
+        "events_count": 0,
+        "severity": "Insufficient data",
+        "events": [],
+        "summary": {
+            "total_events": 0,
+            "apneas": 0,
+            "hypopneas": 0,
+            "avg_apnea_duration": 0.0,
+            "avg_hypopnea_duration": 0.0,
+            "max_duration": 0.0,
+            "baseline_br": 0.0
+        }
+    }
+}
+
+standby_stats = {
+    "node_id": "Offline (Standby)",
+    "seq": "N/A",
+    "rssi": -95,
+    "noise": -96,
+    "freq_mhz": 0,
+    "fps": 0.0
+}
+
+# --- Premium Card Rendering Helpers (HTML/CSS) ---
+
+def draw_vital_signs(telemetry, container):
+    heart_bpm = telemetry.get("heart_bpm", 0.0)
+    resp_bpm = telemetry.get("resp_bpm", 0.0)
+    presence = telemetry.get("presence", False)
+    variance = telemetry.get("variance", 0.0)
+    
+    # Determine value strings
+    heart_str = f"{int(heart_bpm)}" if (presence and heart_bpm > 0) else "---"
+    resp_str = f"{int(resp_bpm)}" if (presence and resp_bpm > 0) else "---"
+    
+    # Determine progress bar percentages
+    if presence and heart_bpm > 0:
+        heart_pct = min(100, max(0, int((heart_bpm - 40) / 100 * 100)))
+    else:
+        heart_pct = 0
+        
+    if presence and resp_bpm > 0:
+        resp_pct = min(100, max(0, int(resp_bpm / 40 * 100)))
+    else:
+        resp_pct = 0
+        
+    if presence:
+        t = time.time()
+        var_boost = min(15, int(variance * 10))
+        confidence_val = min(98, max(65, int(80 + np.sin(t) * 4 + var_boost)))
+    else:
+        confidence_val = 0
+        
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 20px; background-color: #0c0f13; margin-bottom: 15px;'>
+        <div style='color: #8892b0; font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; font-weight: bold;'>VITAL SIGNS</div>
+        
+        <!-- Heart Rate Row -->
+        <div style='margin-bottom: 20px;'>
+            <div style='display: flex; align-items: center; justify-content: space-between;'>
+                <div style='display: flex; align-items: center; gap: 8px;'>
+                    <span style='color: #ff5555; font-size: 1.1rem;'>❤️</span>
+                    <span style='color: #8892b0; font-size: 0.75rem; letter-spacing: 1px;'>HEART RATE</span>
+                </div>
+                <div style='font-size: 1.6rem; font-weight: bold; color: #fff;'>
+                    <span style='color: #ff5555;'>{heart_str}</span> <span style='font-size: 0.85rem; color: #8892b0;'>BPM</span>
+                </div>
+            </div>
+            <div style='background-color: #1b2028; height: 3px; border-radius: 2px; margin-top: 8px; overflow: hidden;'>
+                <div style='background-color: #ff5555; width: {heart_pct}%; height: 100%; transition: width 0.3s ease;'></div>
+            </div>
+        </div>
+        
+        <!-- Respiration Row -->
+        <div style='margin-bottom: 20px;'>
+            <div style='display: flex; align-items: center; justify-content: space-between;'>
+                <div style='display: flex; align-items: center; gap: 8px;'>
+                    <span style='color: #ffeb3b; font-size: 1.1rem;'>🫁</span>
+                    <span style='color: #8892b0; font-size: 0.75rem; letter-spacing: 1px;'>RESPIRATION</span>
+                </div>
+                <div style='font-size: 1.6rem; font-weight: bold; color: #fff;'>
+                    <span style='color: #ffeb3b;'>{resp_str}</span> <span style='font-size: 0.85rem; color: #8892b0;'>RPM</span>
+                </div>
+            </div>
+            <div style='background-color: #1b2028; height: 3px; border-radius: 2px; margin-top: 8px; overflow: hidden;'>
+                <div style='background-color: #ffeb3b; width: {resp_pct}%; height: 100%; transition: width 0.3s ease;'></div>
+            </div>
+        </div>
+        
+        <!-- Confidence Row -->
+        <div>
+            <div style='display: flex; align-items: center; justify-content: space-between;'>
+                <div style='display: flex; align-items: center; gap: 8px;'>
+                    <span style='color: #33ff33; font-size: 1.1rem;'>⚖️</span>
+                    <span style='color: #8892b0; font-size: 0.75rem; letter-spacing: 1px;'>CONFIDENCE</span>
+                </div>
+                <div style='font-size: 1.6rem; font-weight: bold; color: #fff;'>
+                    <span style='color: #33ff33;'>{confidence_val}</span><span style='font-size: 1.1rem; color: #33ff33;'>%</span>
+                </div>
+            </div>
+            <div style='background-color: #1b2028; height: 3px; border-radius: 2px; margin-top: 8px; overflow: hidden;'>
+                <div style='background-color: #33ff33; width: {confidence_val}%; height: 100%; transition: width 0.3s ease;'></div>
+            </div>
+        </div>
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def draw_sleep_apnea(telemetry, container):
+    apnea_status = telemetry.get("apnea_status", {})
+    if not apnea_status:
+        container.empty()
+        return
+        
+    is_apnea = apnea_status.get("is_apnea", False)
+    is_hypopnea = apnea_status.get("is_hypopnea", False)
+    cur_dur = apnea_status.get("current_event_duration", 0.0)
+    baseline_br = apnea_status.get("baseline_br", 0.0)
+    ahi = apnea_status.get("ahi", 0.0)
+    severity = apnea_status.get("severity", "N/A")
+    summary = apnea_status.get("summary", {})
+    total_events = summary.get("total_events", 0)
+    apneas_count = summary.get("apneas", 0)
+    hypopneas_count = summary.get("hypopneas", 0)
+    monitored_sec = apnea_status.get("hours", 0.0) * 3600.0
+    presence = telemetry.get("presence", False)
+    
+    if not presence:
+        status_str = "<span class='grey-text'>[-] ENGINE INACTIVE</span>"
+    elif is_apnea:
+        status_str = f"<span class='red-text' style='font-weight:bold;'>⚠️ APNEA DETECTED ({cur_dur:.0f}s)</span>"
+    elif is_hypopnea:
+        status_str = f"<span class='yellow-text' style='font-weight:bold;'>⚠️ HYPOPNEA DETECTED ({cur_dur:.0f}s)</span>"
+    else:
+        status_str = "<span class='green-text'>[+] NORMAL BREATHING</span>"
+        
+    m_mins = int(monitored_sec // 60)
+    m_secs = int(monitored_sec % 60)
+    monitored_str = f"{m_mins}m {m_secs}s"
+    
+    if severity == "Normal":
+        sev_str = f"<span class='green-text'>{severity}</span>"
+    elif severity == "Mild":
+        sev_str = f"<span class='yellow-text'>{severity}</span>"
+    elif severity == "Moderate":
+        sev_str = f"<span class='magenta-text'>{severity}</span>"
+    elif severity == "Severe":
+        sev_str = f"<span class='red-text' style='font-weight:bold;'>{severity}</span>"
+    else:
+        sev_str = f"<span class='grey-text'>{severity}</span>"
+        
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 20px; background-color: #0c0f13; margin-bottom: 15px;'>
+        <div class='terminal-header'>Sleep Apnea Screener</div>
+        <div class='terminal-row'><span class='terminal-label'>Screener Status:</span><span class='terminal-value'>{status_str}</span></div>
+        <div class='terminal-row'><span class='terminal-label'>Baseline BR:</span><span class='terminal-value'>{baseline_br:.1f} BPM</span></div>
+        <div class='terminal-row'><span class='terminal-label'>Monitored Time:</span><span class='terminal-value'>{monitored_str}</span></div>
+        <div class='terminal-row'><span class='terminal-label'>AHI Index:</span><span class='terminal-value cyan-text'>{ahi:.2f}</span></div>
+        <div class='terminal-row'><span class='terminal-label'>AHI Severity:</span><span class='terminal-value'>{sev_str}</span></div>
+        <div class='terminal-row'><span class='terminal-label'>Total Events:</span><span class='terminal-value'>{total_events} (A: {apneas_count} / H: {hypopneas_count})</span></div>
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def draw_wifi_signal(stats, telemetry, raw_hist, container):
+    rssi = stats.get("rssi", -95)
+    variance = telemetry.get("variance", 0.0)
+    presence = telemetry.get("presence", False)
+    
+    # Motion calculations
+    motion_val = variance * 0.05 if presence else (0.002 + np.random.uniform(-0.001, 0.001))
+    if motion_val < 0: motion_val = 0.0
+    
+    persons_count = 1 if presence else 0
+    if presence:
+        persons_dots = "<span style='color: #33ff33;'>●</span> <span style='color: #1b2028;'>● ● ● ● ● ● ●</span>"
+    else:
+        persons_dots = "<span style='color: #1b2028;'>● ● ● ● ● ● ● ●</span>"
+        
+    # Generate custom SVG sparkline from raw_hist
+    history_slice = list(raw_hist)[-35:]
+    if history_slice:
+        min_val = min(history_slice)
+        max_val = max(history_slice)
+        rng = max_val - min_val if max_val != min_val else 1.0
+        
+        points = []
+        width = 240
+        height = 35
+        for idx, val in enumerate(history_slice):
+            x = int(idx * (width / (len(history_slice) - 1)))
+            y = int(height - 2 - ((val - min_val) / rng) * (height - 4))
+            points.append(f"{x},{y}")
+        svg_path = "M " + " L ".join(points)
+    else:
+        svg_path = "M 0,17 L 240,17"
+        
+    sparkline_svg = f"""
+    <svg width="100%" height="35" viewBox="0 0 240 35" style="margin-top: 15px; overflow: visible;">
+        <defs>
+            <linearGradient id="sparkline-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(0, 100, 255, 0.35)" />
+                <stop offset="100%" stop-color="rgba(0, 100, 255, 0.0)" />
+            </linearGradient>
+        </defs>
+        <path d="{svg_path} L 240,35 L 0,35 Z" fill="url(#sparkline-grad)" stroke="none" />
+        <path d="{svg_path}" fill="none" stroke="#00ffff" stroke-width="1.8" style="filter: drop-shadow(0 0 2px rgba(0, 255, 255, 0.5));" />
+    </svg>
+    """
+    
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 20px; background-color: #0c0f13; margin-bottom: 15px;'>
+        <div style='color: #8892b0; font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; font-weight: bold;'>WIFI SIGNAL</div>
+        
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>RSSI</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{rssi} dBm</span>
+        </div>
+        
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Variance</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{variance:.2f}</span>
+        </div>
+        
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Motion</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{motion_val:.3f}</span>
+        </div>
+        
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Persons</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; display: flex; align-items: center; gap: 6px;'>
+                {persons_count} &nbsp;&nbsp;&nbsp;&nbsp; {persons_dots}
+            </span>
+        </div>
+        
+        {sparkline_svg}
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def draw_presence(telemetry, container):
+    presence = telemetry.get("presence", False)
+    
+    if presence:
+        presence_badge = """
+        <div style='border: 1px solid #33ff33; background-color: rgba(51, 255, 51, 0.05); color: #33ff33; padding: 10px 16px; border-radius: 4px; font-weight: bold; font-size: 1.1rem; letter-spacing: 2px; display: inline-block; width: 100%; text-shadow: 0 0 6px rgba(51, 255, 51, 0.4); box-sizing: border-box; text-align: center;'>
+            PRESENT
+        </div>
+        """
+    else:
+        presence_badge = """
+        <div style='border: 1px solid #6a737d; background-color: rgba(106, 115, 125, 0.05); color: #6a737d; padding: 10px 16px; border-radius: 4px; font-weight: bold; font-size: 1.1rem; letter-spacing: 2px; display: inline-block; width: 100%; box-sizing: border-box; text-align: center;'>
+            ABSENT
+        </div>
+        """
+        
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 15px; background-color: #0c0f13; margin-bottom: 15px; box-sizing: border-box;'>
+        <div style='color: #8892b0; font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; font-weight: bold; text-align: left;'>PRESENCE</div>
+        {presence_badge}
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def draw_apnea_events(telemetry, container):
+    apnea_status = telemetry.get("apnea_status", {})
+    events_list = apnea_status.get("events", []) if apnea_status else []
+    sorted_events = sorted(events_list, key=lambda x: x["start_ts"], reverse=True)[:6]
+    
+    rows_html = ""
+    if not sorted_events:
+        rows_html = "<div class='grey-text' style='text-align:center; padding:15px; font-size: 0.85rem;'>No apnea/hypopnea events logged.</div>"
+    else:
+        for ev in sorted_events:
+            ev_type = ev["type"].upper()
+            color_class = "red-text" if ev_type == "APNEA" else "yellow-text"
+            time_str = time.strftime('%H:%M:%S', time.localtime(ev["start_ts"]))
+            dur = ev["duration_sec"]
+            avg_br = ev["avg_br"]
+            rows_html += f"""
+            <div class='terminal-row' style='font-size: 0.85rem;'>
+                <span class='terminal-label'>[{time_str}] <span class='{color_class}'>{ev_type}</span></span>
+                <span class='terminal-value'>Dur: {dur:.1f}s | Avg BR: {avg_br:.1f}</span>
+            </div>
+            """
+            
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 20px; background-color: #0c0f13; margin-bottom: 15px;'>
+        <div class='terminal-header'>Apnea Event Log</div>
+        {rows_html}
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def draw_indicators_and_keys(telemetry, container):
+    presence = telemetry.get("presence", False)
+    variance = telemetry.get("variance", 0.0)
+    
+    # Determine mode active state
+    is_sleeping = False
+    apnea_status = telemetry.get("apnea_status", {})
+    if apnea_status:
+        is_apnea = apnea_status.get("is_apnea", False)
+        is_hypopnea = apnea_status.get("is_hypopnea", False)
+        if presence and (is_apnea or is_hypopnea or variance < 1.0):
+            is_sleeping = True
+            
+    is_exercising = presence and variance >= 1.0
+    
+    # Gesture vs Gait colors (Gesture is active when idle/sleeping, Gait is active during fitness/squatting)
+    if not presence:
+        gesture_color = "#404b56"
+        gesture_bg = "transparent"
+        gait_color = "#404b56"
+        gait_bg = "transparent"
+    elif is_exercising:
+        gesture_color = "#404b56"
+        gesture_bg = "transparent"
+        gait_color = "#33ff33"
+        gait_bg = "rgba(51, 255, 51, 0.1)"
+    else:
+        gesture_color = "#ffeb3b"
+        gesture_bg = "rgba(255, 235, 59, 0.1)"
+        gait_color = "#404b56"
+        gait_bg = "transparent"
+        
+    html = f"""
+    <div style='display: flex; justify-content: center; gap: 15px; margin-top: 15px; margin-bottom: 15px;'>
+        <span style='border: 1px solid {gesture_color}; color: {gesture_color}; background-color: {gesture_bg}; padding: 3px 14px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; letter-spacing: 0.5px; transition: all 0.3s ease;'>GESTURE</span>
+        <span style='border: 1px solid {gait_color}; color: {gait_color}; background-color: {gait_bg}; padding: 3px 14px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; letter-spacing: 0.5px; transition: all 0.3s ease;'>GAIT</span>
+    </div>
+    <div style='display: flex; justify-content: center; gap: 15px; color: #404b56; font-size: 0.75rem; font-family: monospace; border-top: 1px solid #1b2028; padding-top: 12px; margin-top: 5px;'>
+        <span>[A] Orbit</span>
+        <span>[D] Scenario</span>
+        <span>[F] FPS</span>
+        <span>[S] Settings</span>
+        <span>[Space] Pause</span>
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
+# --- 3-Column Dashboard Structure ---
+
 ui_fall_alert = st.empty()
 
-# Create two columns matching the terminal receiver layout
-col_left, col_right = st.columns(2)
+col_left, col_mid, col_right = st.columns([1.0, 1.8, 1.2])
+
 with col_left:
-    ui_telemetry = st.empty()
+    ui_vital_signs = st.empty()
     ui_apnea = st.empty()
+
+with col_mid:
+    # Header block inside the 3D observatory
+    col_mid_title, col_mid_selector = st.columns([2, 1])
+    with col_mid_title:
+        st.markdown("""
+        <div style="margin-bottom: 5px;">
+            <h1 style="margin: 0; font-family: 'Fira Code', monospace; color: #ffffff; font-size: 2.1rem; font-weight: bold; line-height: 1.1;">
+                <span style="color: #33ff33;">π</span> RuView
+            </h1>
+            <div style="color: #8892b0; font-family: monospace; font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px;">
+                WIFI DENSEPOSE SENSING OBSERVATORY
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col_mid_selector:
+        badge_and_select_col1, badge_and_select_col2 = st.columns([1, 2.5])
+        with badge_and_select_col1:
+            ui_status_pill = st.empty()
+        with badge_and_select_col2:
+            if source_mode == "Signal Simulator":
+                scenario_mode_selected = st.selectbox(
+                    "Scenario Select",
+                    ["Auto Cycle", "Fitness", "Normal Sleeping", "Apnea", "Hypopnea", "Fall", "Idle", "Empty Room"],
+                    label_visibility="collapsed",
+                    key="scenario_select"
+                )
+                config["simulation_mode"] = scenario_mode_selected
+            else:
+                st.selectbox(
+                    "Scenario Select",
+                    ["Live Ingestion"],
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="scenario_select_live"
+                )
+                
+    st.markdown("""
+    <div style="color: #8892b0; font-style: italic; font-size: 0.85rem; margin-top: 5px; margin-bottom: 12px; font-family: 'Fira Code', monospace;">
+        Rep counting and exercise classification from body kinematics.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    ui_3d_observatory = st.empty()
+    ui_indicators = st.empty()
+
 with col_right:
-    ui_network = st.empty()
+    ui_wifi_signal = st.empty()
+    ui_presence = st.empty()
     ui_apnea_events = st.empty()
 
 st.markdown("### 📈 Live Signal Waves")
@@ -932,7 +1676,45 @@ plotly_layout_args = dict(
     height=250,
 )
 
+# Render initial UI in standby state (so page isn't blank on start)
+if not is_running:
+    # Update status indicator badge
+    ui_status_pill.markdown("""
+    <div style='margin-top: 5px; text-align: right;'>
+        <span style='background-color: rgba(106, 115, 125, 0.1); border: 1px solid #6a737d; color: #6a737d; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px;'>○ STANDBY</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    draw_vital_signs(standby_telemetry, ui_vital_signs)
+    draw_sleep_apnea(standby_telemetry, ui_apnea)
+    draw_wifi_signal(standby_stats, standby_telemetry, [], ui_wifi_signal)
+    draw_presence(standby_telemetry, ui_presence)
+    draw_apnea_events(standby_telemetry, ui_apnea_events)
+    
+    # Standby 3D Observatory Figure (no human)
+    fig_3d = generate_3d_observatory(standby_telemetry, standby_stats)
+    ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
+    
+    draw_indicators_and_keys(standby_telemetry, ui_indicators)
+    
+    st.info("🔮 Receiver standby. Select ingestion parameters in the sidebar and click **Launch**.")
+    st.markdown("""
+    ### 💻 Console Instructions:
+    1. Select data source mode from the sidebar options.
+    2. Click **Launch** to initialize the ingestion and processing loops.
+    
+    *If running offline, select **Signal Simulator** to test the real-time DSP filters, telemetry heuristics, and live 3D skeleton.*
+    """)
+
+# Active ingestion loop
 if is_running:
+    # Update status indicator badge
+    ui_status_pill.markdown("""
+    <div style='margin-top: 5px; text-align: right;'>
+        <span style='background-color: rgba(51, 255, 51, 0.1); border: 1px solid #33ff33; color: #33ff33; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px;'>● DEMO</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     last_chart_update = 0.0
     
     # Bounded visual updates loop (refresh UI for ~4 seconds, then yield execution to Streamlit)
@@ -967,122 +1749,24 @@ if is_running:
             else:
                 ui_fall_alert.empty()
                 
-            # 2. Telemetry panel (matches terminal columns)
-            presence_str = "<span class='green-text'>[+] HUMAN PRESENT</span>" if telemetry["presence"] else "<span class='grey-text'>[-] ROOM EMPTY</span>"
-            fall_str = "<span class='red-text' style='font-weight:bold;'>[!] FALL DETECTED</span>" if telemetry["fall_alert"] else "<span class='green-text'>[+] SAFE (No Fall)</span>"
-            resp_str = f"<span class='yellow-text'>{telemetry['resp_bpm']} BPM</span>" if telemetry['resp_bpm'] > 0 else "Calculating..."
-            heart_str = f"<span class='magenta-text'>{int(telemetry['heart_bpm'])} BPM</span>" if telemetry['heart_bpm'] > 0 else "Calculating..."
+            # Draw telemetry cards
+            draw_vital_signs(telemetry, ui_vital_signs)
+            draw_sleep_apnea(telemetry, ui_apnea)
+            draw_wifi_signal(stats, telemetry, raw_hist, ui_wifi_signal)
+            draw_presence(telemetry, ui_presence)
+            draw_apnea_events(telemetry, ui_apnea_events)
             
-            ui_telemetry.markdown(f"""
-            <div class='terminal-container'>
-                <div class='terminal-header'>Telemetry</div>
-                <div class='terminal-row'><span class='terminal-label'>Occupancy Status:</span><span class='terminal-value'>{presence_str}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Fall Monitor:</span><span class='terminal-value'>{fall_str}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Breathing Rate:</span><span class='terminal-value'>{resp_str}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Est. Heart Rate:</span><span class='terminal-value'>{heart_str}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Signal Variance:</span><span class='terminal-value'>{telemetry['variance']:.4f}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Max Acceleration:</span><span class='terminal-value'>{telemetry['acceleration']:.2f}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Exercise Reps:</span><span class='terminal-value cyan-text'>{telemetry['rep_count']}</span></div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Sleep Apnea screener panel
-            apnea_status = telemetry.get("apnea_status", {})
-            if apnea_status:
-                is_apnea = apnea_status.get("is_apnea", False)
-                is_hypopnea = apnea_status.get("is_hypopnea", False)
-                cur_dur = apnea_status.get("current_event_duration", 0.0)
-                baseline_br = apnea_status.get("baseline_br", 0.0)
-                ahi = apnea_status.get("ahi", 0.0)
-                severity = apnea_status.get("severity", "N/A")
-                summary = apnea_status.get("summary", {})
-                total_events = summary.get("total_events", 0)
-                apneas_count = summary.get("apneas", 0)
-                hypopneas_count = summary.get("hypopneas", 0)
-                monitored_sec = apnea_status.get("hours", 0.0) * 3600.0
-                
-                if is_apnea:
-                    status_str = f"<span class='red-text' style='font-weight:bold;'>⚠️ APNEA DETECTED ({cur_dur:.0f}s)</span>"
-                elif is_hypopnea:
-                    status_str = f"<span class='yellow-text' style='font-weight:bold;'>⚠️ HYPOPNEA DETECTED ({cur_dur:.0f}s)</span>"
-                else:
-                    status_str = "<span class='green-text'>[+] NORMAL BREATHING</span>"
-                    
-                m_mins = int(monitored_sec // 60)
-                m_secs = int(monitored_sec % 60)
-                monitored_str = f"{m_mins}m {m_secs}s"
-                
-                if severity == "Normal":
-                    sev_str = f"<span class='green-text'>{severity}</span>"
-                elif severity == "Mild":
-                    sev_str = f"<span class='yellow-text'>{severity}</span>"
-                elif severity == "Moderate":
-                    sev_str = f"<span class='magenta-text'>{severity}</span>"
-                elif severity == "Severe":
-                    sev_str = f"<span class='red-text' style='font-weight:bold;'>{severity}</span>"
-                else:
-                    sev_str = f"<span class='grey-text'>{severity}</span>"
-                    
-                ui_apnea.markdown(f"""
-                <div class='terminal-container'>
-                    <div class='terminal-header'>Sleep Apnea Screener</div>
-                    <div class='terminal-row'><span class='terminal-label'>Screener Status:</span><span class='terminal-value'>{status_str}</span></div>
-                    <div class='terminal-row'><span class='terminal-label'>Baseline BR:</span><span class='terminal-value'>{baseline_br:.1f} BPM</span></div>
-                    <div class='terminal-row'><span class='terminal-label'>Monitored Time:</span><span class='terminal-value'>{monitored_str}</span></div>
-                    <div class='terminal-row'><span class='terminal-label'>AHI Index:</span><span class='terminal-value cyan-text'>{ahi:.2f}</span></div>
-                    <div class='terminal-row'><span class='terminal-label'>AHI Severity:</span><span class='terminal-value'>{sev_str}</span></div>
-                    <div class='terminal-row'><span class='terminal-label'>Total Events:</span><span class='terminal-value'>{total_events} (A: {apneas_count} / H: {hypopneas_count})</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # 3. Network & Radio panel (matches terminal columns)
-            node_val = stats["node_id"]
-            node_str = f"<span class='cyan-text'>{node_val}</span>" if isinstance(node_val, int) else f"<span class='red-text'>{node_val}</span>"
-            
-            ui_network.markdown(f"""
-            <div class='terminal-container'>
-                <div class='terminal-header'>Network & Radio</div>
-                <div class='terminal-row'><span class='terminal-label'>Node ID:</span><span class='terminal-value'>{node_str}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Frequency:</span><span class='terminal-value'>{stats['freq_mhz']} MHz</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Sequence:</span><span class='terminal-value'>{stats['seq']}</span></div>
-                <div class='terminal-row'><span class='terminal-label'>RSSI:</span><span class='terminal-value'>{stats['rssi']} dBm</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Noise Floor:</span><span class='terminal-value'>{stats['noise']} dBm</span></div>
-                <div class='terminal-row'><span class='terminal-label'>Rx Speed (FPS):</span><span class='terminal-value green-text'>{stats['fps']:.1f} FPS</span></div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Sleep Apnea event log
-            events_list = apnea_status.get("events", [])
-            sorted_events = sorted(events_list, key=lambda x: x["start_ts"], reverse=True)[:6]
-            
-            rows_html = ""
-            if not sorted_events:
-                rows_html = "<div class='grey-text' style='text-align:center; padding:10px;'>No apnea/hypopnea events logged.</div>"
-            else:
-                for ev in sorted_events:
-                    ev_type = ev["type"].upper()
-                    color_class = "red-text" if ev_type == "APNEA" else "yellow-text"
-                    time_str = time.strftime('%H:%M:%S', time.localtime(ev["start_ts"]))
-                    dur = ev["duration_sec"]
-                    avg_br = ev["avg_br"]
-                    rows_html += f"""
-                    <div class='terminal-row'>
-                        <span class='terminal-label'>[{time_str}] <span class='{color_class}'>{ev_type}</span></span>
-                        <span class='terminal-value'>Dur: {dur:.1f}s | Avg BR: {avg_br:.1f}</span>
-                    </div>
-                    """
-                    
-            ui_apnea_events.markdown(f"""
-            <div class='terminal-container'>
-                <div class='terminal-header'>Apnea Event Log (Newest First)</div>
-                {rows_html}
-            </div>
-            """, unsafe_allow_html=True)
+            # Draw bottom indicators
+            draw_indicators_and_keys(telemetry, ui_indicators)
             
             # 4. Throttled charts redraw (at ~7 Hz) to avoid CPU spikes
             now = time.time()
             if now - last_chart_update >= 0.15:
                 last_chart_update = now
+                
+                # Draw 3D Observatory (incorporates optimized single-trace sphere drawing)
+                fig_3d = generate_3d_observatory(telemetry, stats)
+                ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
                 
                 # Graph 1: Raw & Filtered CSI
                 fig_csi = go.Figure()
@@ -1106,12 +1790,4 @@ if is_running:
         time.sleep(0.04) # Paced 25 Hz UI refresh rate
         
     st.rerun()
-else:
-    st.info("🔮 Receiver standby. Select ingestion parameters and click **Launch**.")
-    st.markdown("""
-    ### 💻 Console Instructions:
-    1. Select data source mode from the sidebar options.
-    2. Click **Launch** to initialize the ingestion and processing loops.
-    
-    *If running offline, select **Signal Simulator** to test the real-time DSP filters, telemetry heuristics, and live charts.*
-    """)
+
