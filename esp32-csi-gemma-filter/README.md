@@ -124,6 +124,12 @@ nearest-centroid baseline:
 python python-engine/calibration_report.py
 ```
 
+Build the local activity model from the same labels:
+
+```bash
+python python-engine/activity_classifier.py
+```
+
 ### D. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 
