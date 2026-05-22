@@ -88,6 +88,16 @@ The root PlatformIO firmware emits parser-compatible rows:
 timestamp,rssi,csi_0,csi_1,csi_2,csi_3,csi_4,csi_5
 ```
 
+To enable real Wi-Fi CSI capture, copy `include/wifi_credentials.example.h` to
+`include/wifi_credentials.h`, fill `WIFI_SSID` and `WIFI_PASSWORD`, then upload
+the firmware. If that private file is absent, the firmware keeps using a
+simulated CSI-like stream so the Python pipeline still works.
+
+Real CSI frames require Wi-Fi traffic on the connected network. If no rows appear
+after flashing the real CSI mode, keep the ESP32 close to the router and create
+traffic from another device on the same network, such as a continuous ping or
+video stream.
+
 ### C. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 
