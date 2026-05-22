@@ -19,6 +19,7 @@ FEATURE_FIELDS = [
     "missing_or_invalid_count",
 ]
 DEFAULT_TARGET_LABELS = ["empty", "sitting", "walking"]
+DEFAULT_MIN_SAMPLES_PER_WINDOW = 10
 
 
 def load_labeled_windows(labels_dir: str | Path) -> list[dict]:
@@ -69,11 +70,17 @@ def evaluate_nearest_centroid(
     records: list[dict],
     *,
     min_records_per_label: int = 3,
+    min_samples_per_window: int = DEFAULT_MIN_SAMPLES_PER_WINDOW,
 ) -> dict:
-    grouped = _group_eligible_records(records, min_records_per_label)
+    usable_records, ignored_records = filter_usable_records(
+        records,
+        min_samples_per_window=min_samples_per_window,
+    )
+    grouped = _group_eligible_records(usable_records, min_records_per_label)
     if len(grouped) < 2:
         return {
             "eligible": False,
+            "ignored_records": ignored_records,
             "reason": (
                 "need at least two labels with "
                 f"{min_records_per_label}+ records each"
@@ -121,6 +128,7 @@ def evaluate_nearest_centroid(
         "labels": sorted(grouped),
         "train_records": len(train_records),
         "test_records": len(test_records),
+        "ignored_records": ignored_records,
         "accuracy": round(correct / len(test_records), 4),
         "confusion": confusion,
         "predictions": predictions,
@@ -132,11 +140,16 @@ def build_readiness(
     *,
     target_labels: list[str] | None = None,
     min_records_per_label: int = 3,
+    min_samples_per_window: int = DEFAULT_MIN_SAMPLES_PER_WINDOW,
 ) -> dict:
     labels = target_labels or DEFAULT_TARGET_LABELS
     counts: dict[str, int] = {}
+    ignored_counts: dict[str, int] = {}
     for record in records:
         label = str(record.get("label", "unknown"))
+        if not is_usable_record(record, min_samples_per_window):
+            ignored_counts[label] = ignored_counts.get(label, 0) + 1
+            continue
         counts[label] = counts.get(label, 0) + 1
 
     label_status = {}
@@ -147,6 +160,7 @@ def build_readiness(
         ready = needed == 0
         label_status[label] = {
             "records": count,
+            "ignored": ignored_counts.get(label, 0),
             "needed": needed,
             "ready": ready,
         }
@@ -156,6 +170,7 @@ def build_readiness(
     return {
         "ready": not next_labels,
         "min_records_per_label": min_records_per_label,
+        "min_samples_per_window": min_samples_per_window,
         "target_labels": labels,
         "labels": label_status,
         "next_labels": next_labels,
@@ -167,6 +182,7 @@ def build_report(
     *,
     target_labels: list[str] | None = None,
     min_records_per_label: int = 3,
+    min_samples_per_window: int = DEFAULT_MIN_SAMPLES_PER_WINDOW,
 ) -> dict:
     records = load_labeled_windows(labels_dir)
     return {
@@ -176,12 +192,37 @@ def build_report(
             records,
             target_labels=target_labels,
             min_records_per_label=min_records_per_label,
+            min_samples_per_window=min_samples_per_window,
         ),
         "evaluation": evaluate_nearest_centroid(
             records,
             min_records_per_label=min_records_per_label,
+            min_samples_per_window=min_samples_per_window,
         ),
     }
+
+
+def is_usable_record(record: dict, min_samples_per_window: int) -> bool:
+    features = record.get("features")
+    if not isinstance(features, dict):
+        return False
+    try:
+        return int(features.get("sample_count", 0)) >= min_samples_per_window
+    except (TypeError, ValueError):
+        return False
+
+
+def filter_usable_records(
+    records: list[dict],
+    *,
+    min_samples_per_window: int = DEFAULT_MIN_SAMPLES_PER_WINDOW,
+) -> tuple[list[dict], int]:
+    usable_records = [
+        record
+        for record in records
+        if is_usable_record(record, min_samples_per_window)
+    ]
+    return usable_records, len(records) - len(usable_records)
 
 
 def _group_eligible_records(records: list[dict], min_records_per_label: int) -> dict:
@@ -256,6 +297,12 @@ def main() -> None:
         default=3,
         help="Minimum records required for each target label.",
     )
+    parser.add_argument(
+        "--min-samples-per-window",
+        type=int,
+        default=DEFAULT_MIN_SAMPLES_PER_WINDOW,
+        help="Minimum CSI samples required before a labeled window is used.",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
@@ -263,6 +310,7 @@ def main() -> None:
                 args.labels_dir,
                 target_labels=args.target_labels,
                 min_records_per_label=args.min_records_per_label,
+                min_samples_per_window=args.min_samples_per_window,
             ),
             indent=2,
             sort_keys=True,

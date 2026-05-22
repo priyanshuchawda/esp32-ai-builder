@@ -1,7 +1,7 @@
 from activity_classifier import build_activity_model, predict_activity
 
 
-def _record(label, signal_mean, signal_std, window_index):
+def _record(label, signal_mean, signal_std, window_index, sample_count=20):
     return {
         "label": label,
         "session_id": f"session_{label}",
@@ -16,7 +16,7 @@ def _record(label, signal_mean, signal_std, window_index):
             "outlier_ratio": 0.0,
             "min_value": signal_mean - 1.0,
             "max_value": signal_mean + 1.0,
-            "sample_count": 20,
+            "sample_count": sample_count,
             "missing_or_invalid_count": 0,
         },
     }
@@ -46,6 +46,27 @@ def test_build_activity_model_creates_centroids_for_eligible_labels():
     assert model["record_counts"] == {"empty": 2, "walking": 2}
     assert model["centroids"]["empty"]["signal_mean"] == 11.0
     assert model["centroids"]["walking"]["signal_std"] == 4.1
+
+
+def test_build_activity_model_ignores_undersized_windows():
+    records = [
+        _record("sitting", 20.0, 1.0, 0),
+        _record("sitting", 22.0, 1.2, 1),
+        _record("sitting", 80.0, 8.0, 2, sample_count=4),
+        _record("walking", 40.0, 4.0, 0),
+        _record("walking", 42.0, 4.2, 1),
+    ]
+
+    model = build_activity_model(
+        records,
+        min_records_per_label=2,
+        min_samples_per_window=10,
+    )
+
+    assert model["eligible"] is True
+    assert model["ignored_records"] == 1
+    assert model["record_counts"]["sitting"] == 2
+    assert model["centroids"]["sitting"]["signal_mean"] == 21.0
 
 
 def test_predict_activity_returns_nearest_label_with_distances():

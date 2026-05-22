@@ -8,7 +8,7 @@ from calibration_report import (
 )
 
 
-def _record(label, signal_mean, signal_std, window_index):
+def _record(label, signal_mean, signal_std, window_index, sample_count=20):
     return {
         "label": label,
         "session_id": f"session_{label}",
@@ -24,7 +24,7 @@ def _record(label, signal_mean, signal_std, window_index):
             "outlier_ratio": 0.0,
             "min_value": signal_mean - 1.0,
             "max_value": signal_mean + 1.0,
-            "sample_count": 20,
+            "sample_count": sample_count,
             "missing_or_invalid_count": 0,
         },
         "decision": {"filter": "moving_average", "confidence": 1.0},
@@ -94,6 +94,27 @@ def test_evaluate_nearest_centroid_requires_two_labels():
     assert "at least two labels" in report["reason"]
 
 
+def test_evaluate_nearest_centroid_ignores_undersized_windows():
+    records = [
+        _record("sitting", 20.0, 1.0, 0),
+        _record("sitting", 21.0, 1.1, 1),
+        _record("sitting", 80.0, 8.0, 2, sample_count=4),
+        _record("walking", 40.0, 4.0, 0),
+        _record("walking", 41.0, 4.1, 1),
+    ]
+
+    report = evaluate_nearest_centroid(
+        records,
+        min_records_per_label=2,
+        min_samples_per_window=10,
+    )
+
+    assert report["eligible"] is True
+    assert report["ignored_records"] == 1
+    assert report["train_records"] == 2
+    assert report["test_records"] == 2
+
+
 def test_build_readiness_reports_missing_target_labels():
     records = [
         _record("walking", 40.0, 4.0, 0),
@@ -130,3 +151,23 @@ def test_build_readiness_reports_ready_when_targets_have_enough_records():
 
     assert readiness["ready"] is True
     assert readiness["next_labels"] == []
+
+
+def test_build_readiness_counts_only_usable_windows():
+    records = [
+        _record("sitting", 20.0, 1.0, 0),
+        _record("sitting", 21.0, 1.1, 1),
+        _record("sitting", 22.0, 1.2, 2, sample_count=4),
+    ]
+
+    readiness = build_readiness(
+        records,
+        target_labels=["sitting"],
+        min_records_per_label=3,
+        min_samples_per_window=10,
+    )
+
+    assert readiness["ready"] is False
+    assert readiness["labels"]["sitting"]["records"] == 2
+    assert readiness["labels"]["sitting"]["ignored"] == 1
+    assert readiness["labels"]["sitting"]["needed"] == 1
