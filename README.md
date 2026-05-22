@@ -5,7 +5,7 @@ ESP32 + AI workspace for Wi-Fi CSI sensing experiments, a Python Gemma filtering
 ## Main Components
 
 - `esp32-csi-gemma-filter/`: Python CSI filtering pipeline with hosted Gemma 4 advisor support through the Gemini API, optional Ollama fallback, and Telegram human-presence alerts.
-- `src/`, `include/`, `lib/`, `test/`, `platformio.ini`: PlatformIO ESP32 firmware workspace.
+- `src/`, `include/`, `lib/`, `test/`, `platformio.ini`: PlatformIO ESP32 firmware workspace that streams parser-compatible CSI-like serial rows.
 - `backend/`: Python backend scaffold managed with `uv`.
 - `frontend/`: Vite React frontend scaffold.
 
