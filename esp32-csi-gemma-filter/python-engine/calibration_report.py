@@ -18,6 +18,7 @@ FEATURE_FIELDS = [
     "sample_count",
     "missing_or_invalid_count",
 ]
+DEFAULT_TARGET_LABELS = ["empty", "sitting", "walking"]
 
 
 def load_labeled_windows(labels_dir: str | Path) -> list[dict]:
@@ -126,12 +127,60 @@ def evaluate_nearest_centroid(
     }
 
 
-def build_report(labels_dir: str | Path = config.LABELS_DIR) -> dict:
+def build_readiness(
+    records: list[dict],
+    *,
+    target_labels: list[str] | None = None,
+    min_records_per_label: int = 3,
+) -> dict:
+    labels = target_labels or DEFAULT_TARGET_LABELS
+    counts: dict[str, int] = {}
+    for record in records:
+        label = str(record.get("label", "unknown"))
+        counts[label] = counts.get(label, 0) + 1
+
+    label_status = {}
+    next_labels = []
+    for label in labels:
+        count = counts.get(label, 0)
+        needed = max(0, min_records_per_label - count)
+        ready = needed == 0
+        label_status[label] = {
+            "records": count,
+            "needed": needed,
+            "ready": ready,
+        }
+        if not ready:
+            next_labels.append(label)
+
+    return {
+        "ready": not next_labels,
+        "min_records_per_label": min_records_per_label,
+        "target_labels": labels,
+        "labels": label_status,
+        "next_labels": next_labels,
+    }
+
+
+def build_report(
+    labels_dir: str | Path = config.LABELS_DIR,
+    *,
+    target_labels: list[str] | None = None,
+    min_records_per_label: int = 3,
+) -> dict:
     records = load_labeled_windows(labels_dir)
     return {
         "labels_dir": str(Path(labels_dir)),
         "summary": summarize_labels(records),
-        "evaluation": evaluate_nearest_centroid(records),
+        "readiness": build_readiness(
+            records,
+            target_labels=target_labels,
+            min_records_per_label=min_records_per_label,
+        ),
+        "evaluation": evaluate_nearest_centroid(
+            records,
+            min_records_per_label=min_records_per_label,
+        ),
     }
 
 
@@ -195,8 +244,30 @@ def main() -> None:
         default=config.LABELS_DIR,
         help="Directory containing labeled JSONL files.",
     )
+    parser.add_argument(
+        "--target-label",
+        action="append",
+        dest="target_labels",
+        help="Target activity label to check. Can be repeated.",
+    )
+    parser.add_argument(
+        "--min-records-per-label",
+        type=int,
+        default=3,
+        help="Minimum records required for each target label.",
+    )
     args = parser.parse_args()
-    print(json.dumps(build_report(args.labels_dir), indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            build_report(
+                args.labels_dir,
+                target_labels=args.target_labels,
+                min_records_per_label=args.min_records_per_label,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

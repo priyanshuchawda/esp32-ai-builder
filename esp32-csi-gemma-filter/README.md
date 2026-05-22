@@ -124,6 +124,9 @@ nearest-centroid baseline:
 python python-engine/calibration_report.py
 ```
 
+The report includes a readiness block for the default labels `empty`,
+`sitting`, and `walking`, including how many rows are still needed per label.
+
 Build the local activity model from the same labels:
 
 ```bash
