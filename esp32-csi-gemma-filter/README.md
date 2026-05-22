@@ -117,6 +117,13 @@ Labels are normalized to safe filenames and appended as JSONL under
 `python-engine/data/labels/<label>.jsonl`.
 The `rules` advisor avoids slow network calls while collecting calibration data.
 
+After collecting at least two labels, summarize the dataset and run the local
+nearest-centroid baseline:
+
+```bash
+python python-engine/calibration_report.py
+```
+
 ### D. Telegram Human-Presence Alerts
 Copy `.env.example` to `.env`, then set:
 

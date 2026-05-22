@@ -27,6 +27,12 @@ cd esp32-csi-gemma-filter
 uv run --with-requirements python-engine/requirements.txt python python-engine/app.py --mode serial --port COM5 --baud 115200 --duration 30 --label walking --advisor-provider rules
 ```
 
+Summarize collected labels and run the local baseline evaluator:
+
+```powershell
+uv run --with-requirements python-engine/requirements.txt python python-engine/calibration_report.py
+```
+
 ## Test
 
 ```powershell
