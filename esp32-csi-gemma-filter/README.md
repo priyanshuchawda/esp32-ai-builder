@@ -1,16 +1,16 @@
 # esp32-csi-gemma-filter
 
-Gemma 4 E4B assisted local Wi-Fi CSI noise filtering using ESP32 and Python.
+Gemma 4 assisted Wi-Fi CSI noise filtering using ESP32, Python, and the Gemini API.
 
 ## Project Goal
-This project builds a local Wi-Fi Channel State Information (CSI) noise-filtering pipeline. It uses an ESP32 micro-controller to capture raw radio signals, a Python processing engine on a laptop to analyze signal windows, and a locally-hosted Gemma 4 E4B model (via Ollama) as a high-level Advisor/Controller that determines the best filtering configuration dynamically.
+This project builds a Wi-Fi Channel State Information (CSI) noise-filtering pipeline. It uses an ESP32 micro-controller to capture raw radio signals, a Python processing engine on a laptop to analyze signal windows, and hosted Gemma 4 through the Gemini API as a high-level Advisor/Controller that determines the best filtering configuration dynamically.
 
 ## Architecture
 
 ```text
 +--------------+                   +---------------+
-|  ESP32 Board | --(COM5 Serial)-->| Python Engine | <--[Summary Stats Only]--> Local Gemma 4 E4B
-+--------------+                   +---------------+                            (via Ollama API)
+|  ESP32 Board | --(COM5 Serial)-->| Python Engine | <--[Summary Stats Only]--> Gemma 4
++--------------+                   +---------------+                            (Gemini API)
                                            |
                                            +---> Filters Signal (Numpy)
                                            |
@@ -21,7 +21,7 @@ This project builds a local Wi-Fi Channel State Information (CSI) noise-filterin
 ### Design Justifications
 
 * **Why ESP32?**: The ESP32 is a cheap, low-power micro-controller with full Wi-Fi capability. It supports dumping raw OFDM channel frequency response (CSI) subcarrier information, making it ideal for wireless sensing.
-* **Why Gemma on Laptop?**: A local LLM requires gigabytes of RAM and heavy floating-point operations. The ESP32 has only 320 KB RAM and a 240 MHz dual-core CPU, making it incapable of running Gemma. Running Gemma locally on the laptop ensures privacy and offline capability.
+* **Why hosted Gemma?**: A local LLM requires gigabytes of RAM and heavy floating-point operations. The ESP32 has only 320 KB RAM and a 240 MHz dual-core CPU, making it incapable of running Gemma. The Gemini API gives the Python engine hosted access to stronger Gemma 4 models without running a local model server.
 * **Why Advisor/Controller split?**: Sending every high-frequency CSI sample directly to a local LLM would create a bottleneck due to latency. Instead, Python computes window statistics (variance, outlier ratio, standard deviation) and queries Gemma only once per window. Python then performs the actual mathematical DSP filtering on the full high-frequency signal in milliseconds using numpy.
 
 ---
@@ -43,13 +43,28 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Ollama & Gemma Setup
-1. Download and install [Ollama](https://ollama.com/) for Windows.
-2. Pull and run the required model:
-   ```bash
-   ollama run gemma4:e4b
+### 2. Gemini API Gemma Setup
+1. Create a Gemini API key in Google AI Studio.
+2. Copy `.env.example` to `.env`.
+3. Set:
+   ```env
+   GEMMA_ADVISOR_PROVIDER=gemini
+   GEMINI_API_KEY=
+   GEMINI_GEMMA_MODEL=gemma-4-31b-it
+   GEMINI_THINKING_LEVEL=high
    ```
-3. Keep Ollama running in the background. The python engine connects to `http://localhost:11434/api/chat`.
+
+The default hosted model is `gemma-4-31b-it`. You can switch to `gemma-4-26b-a4b-it` by changing `GEMINI_GEMMA_MODEL`.
+
+### 3. Optional Local Ollama Fallback
+If you want to use a local Ollama server instead of the Gemini API, set:
+
+```env
+GEMMA_ADVISOR_PROVIDER=ollama
+OLLAMA_TIMEOUT_SECONDS=120
+```
+
+The local engine uses `gemma4:e2b` by default.
 
 ---
 

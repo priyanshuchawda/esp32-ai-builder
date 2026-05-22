@@ -17,6 +17,14 @@ if load_dotenv is not None:
     load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
     load_dotenv(os.path.join(os.path.dirname(BASE_DIR), ".env"), override=False)
 
+# Gemma Advisor Settings
+GEMMA_ADVISOR_PROVIDER = os.getenv("GEMMA_ADVISOR_PROVIDER", "gemini").strip().lower()
+
+# Hosted Gemini API Settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_GEMMA_MODEL = os.getenv("GEMINI_GEMMA_MODEL", "gemma-4-31b-it").strip()
+GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
+
 # Ollama Local API Settings
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "gemma4:e2b"
