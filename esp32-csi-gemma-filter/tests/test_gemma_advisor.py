@@ -85,6 +85,16 @@ def test_query_gemma_advisor_falls_back_without_gemini_key(monkeypatch):
     assert "Rule-based fallback" in decision["reason"]
 
 
+def test_query_gemma_advisor_supports_rules_provider(monkeypatch):
+    monkeypatch.setattr(config, "GEMMA_ADVISOR_PROVIDER", "rules")
+
+    features = {"outlier_ratio": 0.0, "signal_std": 2.5}
+    decision = query_gemma_advisor(features)
+
+    assert decision["filter"] == "moving_average"
+    assert "Rule-based fallback" in decision["reason"]
+
+
 @patch("requests.post")
 def test_query_ollama_advisor_success(mock_post):
     # Mock a successful response from Ollama API
