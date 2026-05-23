@@ -55,6 +55,7 @@ class TestEspLiveProbe(unittest.TestCase):
         self.assertIn("SERIAL_STATUS FAIL port=COM5 lines=0 error=PermissionError", lines)
         self.assertIn("QUALITY_STATUS BAD reasons=no_packets", lines)
         self.assertIn("OCCUPANCY UNKNOWN trusted=False reasons=signal_quality_bad", lines)
+        self.assertIn("POWER_SUMMARY state=SIGNAL_WATCH confidence=LOW", lines)
         self.assertFalse(any("local device path" in line for line in lines))
 
     def test_load_firmware_network_config_ignores_secret_values(self):
