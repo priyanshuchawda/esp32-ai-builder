@@ -132,6 +132,7 @@ class TestDashboardIntegrity(unittest.TestCase):
             "variance": 1.45,
             "spikes_filtered": 2,
             "motion": {"level": "MODERATE", "score": 1.25},
+            "occupancy": {"class": "OCCUPIED", "trusted": True},
             "presence_confidence": {
                 "score": 95,
                 "level": "HIGH",
@@ -148,6 +149,8 @@ class TestDashboardIntegrity(unittest.TestCase):
         self.assertIn("Spikes Filtered", html)
         self.assertIn(">2</span>", html)
         self.assertIn("MODERATE 1.250", html)
+        self.assertIn("Occupancy Class", html)
+        self.assertIn("OCCUPIED", html)
         self.assertIn("1.45", html)
         self.assertIn("svg", html)
 

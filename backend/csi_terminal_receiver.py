@@ -28,6 +28,8 @@ try:
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_recommendations import build_signal_recommendations
     from backend.csi_subcarriers import SubcarrierSelector
+    from backend.live_label_evaluator import evaluate_live_labels
+    from backend.live_occupancy import classify_occupancy
 except ImportError:
     from csi_calibration import PresenceCalibration
     from csi_confidence import evaluate_presence_confidence
@@ -36,6 +38,8 @@ except ImportError:
     from csi_quality import SignalQualityMonitor
     from csi_recommendations import build_signal_recommendations
     from csi_subcarriers import SubcarrierSelector
+    from live_label_evaluator import evaluate_live_labels
+    from live_occupancy import classify_occupancy
 
 # Try importing scipy for butterworth bandpass filters
 try:
@@ -49,6 +53,21 @@ BIND_IP = "0.0.0.0"
 BIND_PORT = 5005
 BUFFER_SIZE = 200
 UDP_TIMEOUT_SEC = 0.1
+LIVE_LABELS_DIR = "backend/data/live_labels"
+
+
+def default_evaluator_report():
+    return {
+        "readiness": {"ready": False},
+        "model": {"feature": "filtered_variance", "threshold": 0.0},
+    }
+
+
+def load_evaluator_report(labels_dir=LIVE_LABELS_DIR):
+    try:
+        return evaluate_live_labels(labels_dir)
+    except Exception:
+        return default_evaluator_report()
 
 class RuViewDSP:
     def __init__(self, fps=50.0):
@@ -287,6 +306,7 @@ def draw_ascii_graph(history, width=50, height=8):
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
     enriched["motion"] = gate_motion_for_quality(enriched.get("motion", {}), signal_quality)
+    enriched["occupancy"] = classify_occupancy(enriched, signal_quality, load_evaluator_report())
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
     enriched["recommendations"] = build_signal_recommendations(
         signal_quality,
@@ -321,6 +341,8 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Signal Variance:", f"{telemetry['variance']:.4f}")
     motion = telemetry.get("motion", {})
     table.add_row("Motion Level:", f"{motion.get('display_level', motion.get('level', 'STILL'))} {float(motion.get('score', 0.0) or 0.0):.3f}")
+    occupancy = telemetry.get("occupancy", {})
+    table.add_row("Occupancy Class:", occupancy.get("class", "UNKNOWN"))
     table.add_row("Presence Threshold:", f"{telemetry.get('effective_presence_threshold', 0.0):.4f}")
     table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
     table.add_row("Confidence Gate:", f"{confidence_score}% {confidence_label}")

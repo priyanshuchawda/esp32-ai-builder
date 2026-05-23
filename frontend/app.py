@@ -17,6 +17,8 @@ from backend.csi_motion import MotionLevelEstimator, gate_motion_for_quality
 from backend.csi_quality import SignalQualityMonitor
 from backend.csi_recommendations import build_signal_recommendations
 from backend.csi_subcarriers import SubcarrierSelector
+from backend.live_label_evaluator import evaluate_live_labels
+from backend.live_occupancy import classify_occupancy
 
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
 try:
@@ -136,6 +138,21 @@ st.markdown("""
 
 # ----------------- CACHED SHARED RESOURCES -----------------
 BUFFER_SIZE = 200
+LIVE_LABELS_DIR = "backend/data/live_labels"
+
+
+def default_evaluator_report():
+    return {
+        "readiness": {"ready": False},
+        "model": {"feature": "filtered_variance", "threshold": 0.0},
+    }
+
+
+def load_evaluator_report(labels_dir=LIVE_LABELS_DIR):
+    try:
+        return evaluate_live_labels(labels_dir)
+    except Exception:
+        return default_evaluator_report()
 
 
 def default_presence_confidence():
@@ -161,6 +178,7 @@ def default_recommendations():
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
     enriched["motion"] = gate_motion_for_quality(enriched.get("motion", {}), signal_quality)
+    enriched["occupancy"] = classify_occupancy(enriched, signal_quality, load_evaluator_report())
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
     enriched["recommendations"] = build_signal_recommendations(
         signal_quality,
@@ -1808,6 +1826,8 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     selected_subcarriers = stats.get("selected_subcarriers", [])
     selected_text = ", ".join(str(index) for index in selected_subcarriers[:8]) if selected_subcarriers else "warming up"
     recommendations = telemetry.get("recommendations", [])[:3]
+    occupancy = telemetry.get("occupancy", {})
+    occupancy_class = occupancy.get("class", "UNKNOWN")
     recommendation_rows = ""
     for item in recommendations:
         title = html_lib.escape(str(item.get("title", "")))
@@ -1905,6 +1925,11 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
             <span style='font-weight: bold; color: #00ffff; font-family: monospace; display: flex; align-items: center; gap: 6px;'>
                 {persons_count} &nbsp;&nbsp;&nbsp;&nbsp; {persons_dots}
             </span>
+        </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Occupancy Class</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{occupancy_class}</span>
         </div>
 
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
