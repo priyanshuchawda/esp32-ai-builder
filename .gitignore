@@ -23,6 +23,7 @@ dist/
 build/
 
 # Local runtime output
+artifacts/
 *.log
 backend/data/
 esp32-csi-gemma-filter/python-engine/data/
