@@ -4,6 +4,7 @@ from backend.esp_live_probe import (
     SerialProbeResult,
     build_probe_lines,
     load_firmware_network_config,
+    recommend_next_actions,
     summarize_target_ip,
     summarize_udp,
 )
@@ -117,6 +118,32 @@ class TestEspLiveProbe(unittest.TestCase):
         )
 
         self.assertIn("LIVE_PROBE issue=53 status=FAIL duration_sec=5", lines)
+
+    def test_recommends_releasing_com_port_when_udp_is_empty_and_serial_is_locked(self):
+        actions = recommend_next_actions(
+            config_summary={"status": "PASS", "reason": "ok"},
+            udp_summary={"status": "FAIL", "reason": "no_packets"},
+            quality_summary={"status": "BAD", "reasons": ["no_packets"]},
+            serial_result=SerialProbeResult(status="FAIL", port="COM5", error_type="PermissionError"),
+        )
+
+        self.assertIn("release_or_replug_serial_port", actions)
+        self.assertIn("reset_or_reflash_esp_streaming_firmware", actions)
+
+    def test_probe_lines_include_next_actions(self):
+        lines = build_probe_lines(
+            issue=55,
+            duration_sec=5,
+            config_summary={"status": "PASS", "reason": "ok", "target_ip": "192.168.29.20", "local_ip": "192.168.29.20"},
+            udp_summary={"status": "FAIL", "reason": "no_packets", "packets": 0, "fps": 0.0},
+            quality_summary={"status": "BAD", "reasons": ["no_packets"]},
+            modes={},
+            occupancy={"class": "UNKNOWN", "trusted": False, "reasons": ["signal_quality_bad"]},
+            serial_result=SerialProbeResult(status="FAIL", port="COM5", error_type="PermissionError"),
+        )
+
+        self.assertIn("NEXT_ACTION release_or_replug_serial_port", lines)
+        self.assertIn("NEXT_ACTION reset_or_reflash_esp_streaming_firmware", lines)
 
 
 if __name__ == "__main__":
