@@ -24,6 +24,7 @@ build/
 
 # Local runtime output
 artifacts/
+.ai-logs/
 *.log
 backend/data/
 esp32-csi-gemma-filter/python-engine/data/

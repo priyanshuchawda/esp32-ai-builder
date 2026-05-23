@@ -16,6 +16,7 @@ def test_judge_demo_payload_contains_scenarios_and_live_snapshot():
     assert data["live"]["room_state"]["label"]
     assert data["selected"]["spectrogram"]["rows"]
     assert data["selected"]["material_change"]["baseline_ready"] is True
+    assert data["selected"]["motion_cadence"]["state"]
     assert data["scenarios"][0]["fingerprint"]["bars"].isascii()
     assert data["scenarios"][0]["room_state"]["cluster_id"] >= 0
     assert data["pipeline"][0]["label"] == "ESP32 DevKit V1"
@@ -30,3 +31,4 @@ def test_judge_demo_payload_can_select_scenario():
     data = response.json()
     assert data["selected"]["scenario"] == "walking"
     assert data["selected"]["summary"]["demo_state"] == "OCCUPIED_MOVING"
+    assert data["selected"]["motion_cadence"]["state"] == "walking"

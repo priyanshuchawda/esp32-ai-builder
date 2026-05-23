@@ -89,6 +89,17 @@ type MaterialChange = {
   null_map: string
 }
 
+type MotionCadence = {
+  state: string
+  trusted: boolean
+  cadence_spm: number
+  dominant_frequency_hz: number
+  regularity: number
+  stride_regularity: number
+  sample_count: number
+  trust_reason: string
+}
+
 type ScenarioSnapshot = {
   scenario: string
   telemetry: Telemetry
@@ -98,6 +109,7 @@ type ScenarioSnapshot = {
   room_state?: RoomState
   spectrogram?: Spectrogram
   material_change?: MaterialChange
+  motion_cadence?: MotionCadence
   source?: string
   note?: string
 }
@@ -173,6 +185,16 @@ const fallbackPayload: DemoPayload = {
       next_action: 'Keep room stable for cleaner calibration.',
     },
     fingerprint: { bins: 16, mean: 18.6, spread: 12, bars: '..:=+**+=--=*#*=' },
+    motion_cadence: {
+      state: 'stationary',
+      trusted: true,
+      cadence_spm: 0,
+      dominant_frequency_hz: 0,
+      regularity: 0,
+      stride_regularity: 0,
+      sample_count: 80,
+      trust_reason: 'low_motion_energy',
+    },
   },
   scenarios: [
     {
@@ -195,6 +217,16 @@ const fallbackPayload: DemoPayload = {
         next_action: 'Use this as calibration reference.',
       },
       fingerprint: { bins: 16, mean: 12.2, spread: 1, bars: '................' },
+      motion_cadence: {
+        state: 'stationary',
+        trusted: true,
+        cadence_spm: 0,
+        dominant_frequency_hz: 0,
+        regularity: 0,
+        stride_regularity: 0,
+        sample_count: 80,
+        trust_reason: 'low_motion_energy',
+      },
     },
     {
       scenario: 'occupied_still',
@@ -216,6 +248,16 @@ const fallbackPayload: DemoPayload = {
         next_action: 'Keep room stable for cleaner calibration.',
       },
       fingerprint: { bins: 16, mean: 18.6, spread: 12, bars: '..:=+**+=--=*#*=' },
+      motion_cadence: {
+        state: 'stationary',
+        trusted: true,
+        cadence_spm: 0,
+        dominant_frequency_hz: 0,
+        regularity: 0,
+        stride_regularity: 0,
+        sample_count: 80,
+        trust_reason: 'low_motion_energy',
+      },
     },
   ],
   live: {
@@ -240,6 +282,16 @@ const fallbackPayload: DemoPayload = {
       next_action: 'Improve stream FPS before trusting classification.',
     },
     fingerprint: { bins: 16, mean: 22.7, spread: 26, bars: '-#-#-#-#-#-#-#-#' },
+    motion_cadence: {
+      state: 'signal_watch',
+      trusted: false,
+      cadence_spm: 0,
+      dominant_frequency_hz: 0,
+      regularity: 0,
+      stride_regularity: 0,
+      sample_count: 0,
+      trust_reason: 'signal_quality_not_good',
+    },
   },
   pipeline: [
     { label: 'ESP32 DevKit V1', detail: 'Captures Wi-Fi CSI amplitude changes.', state: 'hardware' },
@@ -348,6 +400,8 @@ function App() {
   const liveRoomState = live.room_state
   const materialChange = selected.material_change
   const liveMaterialChange = live.material_change
+  const motionCadence = selected.motion_cadence
+  const liveMotionCadence = live.motion_cadence
   const selectedValues = useMemo(
     () => fingerprintValues(selected.fingerprint.bars),
     [selected.fingerprint.bars],
@@ -421,6 +475,7 @@ function App() {
             </div>
           ) : null}
           {materialChange ? <MaterialChangeStrip materialChange={materialChange} /> : null}
+          {motionCadence ? <MotionCadenceStrip motionCadence={motionCadence} /> : null}
           <div className="metric-grid">
             <Metric icon={<UserRound size={18} />} label="Occupancy" value={selected.telemetry.occupancy.class} />
             <Metric icon={<Activity size={18} />} label="Motion" value={selected.telemetry.motion.display_level} />
@@ -497,6 +552,7 @@ function App() {
               }
             />
           </div>
+          {liveMotionCadence ? <MotionCadenceStrip motionCadence={liveMotionCadence} compact /> : null}
           <p className={`muted ${liveProbeStatus === 'error' ? 'error' : ''}`}>
             {liveProbeStatus === 'error'
               ? liveProbeError
@@ -544,6 +600,32 @@ function App() {
         </article>
       </section>
     </main>
+  )
+}
+
+function MotionCadenceStrip({
+  motionCadence,
+  compact = false,
+}: {
+  motionCadence: MotionCadence
+  compact?: boolean
+}) {
+  const cadence =
+    motionCadence.cadence_spm > 0 ? `${formatNumber(motionCadence.cadence_spm, 0)} spm` : 'no cadence'
+  const confidence = motionCadence.trusted ? 'trusted rhythm' : motionCadence.trust_reason.replaceAll('_', ' ')
+
+  return (
+    <div className={`cadence-strip ${motionCadence.trusted ? 'trusted' : ''} ${compact ? 'compact' : ''}`}>
+      <span>
+        <strong>{motionCadence.state.replaceAll('_', ' ')}</strong>
+        {confidence}
+      </span>
+      <span>
+        <strong>{cadence}</strong>
+        {formatNumber(motionCadence.dominant_frequency_hz, 2)} Hz
+      </span>
+      <code>r {formatNumber(motionCadence.regularity, 2)}</code>
+    </div>
   )
 }
 

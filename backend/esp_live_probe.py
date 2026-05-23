@@ -109,13 +109,19 @@ def build_probe_lines(
     return lines
 
 
-def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float) -> tuple[dict, dict, dict[int, int], dict, dict, dict]:
+def run_udp_probe(
+    bind_ip: str,
+    udp_port: int,
+    duration_sec: int,
+    min_fps: float,
+) -> tuple[dict, dict, dict[int, int], dict, dict, dict, dict]:
     from backend.csi_fingerprint import build_fingerprint
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_spectrogram import build_spectrogram
     from backend.csi_subcarriers import SubcarrierSelector
     from backend.csi_terminal_receiver import RuViewDSP, load_evaluator_report, parse_adr018_packet, with_presence_confidence
     from backend.live_occupancy import classify_occupancy
+    from backend.motion_cadence import analyze_motion_cadence
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -129,6 +135,7 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     modes: dict[int, int] = {}
     latest_amplitudes = []
     recent_frames = []
+    motion_samples = []
     started = time.time()
     end_at = started + duration_sec
 
@@ -147,13 +154,15 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
             if len(recent_frames) > 96:
                 recent_frames.pop(0)
             modes[packet["n_subcarriers"]] = modes.get(packet["n_subcarriers"], 0) + 1
+            now = time.time()
             quality.record_packet(
                 seq=packet["seq"],
                 rssi=packet["rssi"],
                 n_subcarriers=packet["n_subcarriers"],
-                timestamp=time.time(),
+                timestamp=now,
             )
             selected = selector.add_frame(packet["amplitudes"])["selected_signal"]
+            motion_samples.append((now, selected))
             dsp.add_sample(selected)
     finally:
         sock.close()
@@ -165,7 +174,8 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     occupancy = classify_occupancy(telemetry, quality_summary, load_evaluator_report())
     fingerprint = build_fingerprint(latest_amplitudes, bins=16)
     spectrogram = build_spectrogram(recent_frames, time_bins=24, subcarrier_bins=16)
-    return udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram
+    motion_cadence = analyze_motion_cadence(motion_samples, quality_status=quality_summary.get("status"))
+    return udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram, motion_cadence
 
 
 def load_firmware_network_config(path: Path | None = None, text: str | None = None) -> dict:
@@ -299,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.serial_port:
         serial_result = probe_serial(args.serial_port, args.serial_baud, args.serial_seconds)
 
-    udp_summary, quality_summary, modes, occupancy, fingerprint, _spectrogram = run_udp_probe(
+    udp_summary, quality_summary, modes, occupancy, fingerprint, _spectrogram, _motion_cadence = run_udp_probe(
         bind_ip=args.bind_ip,
         udp_port=args.udp_port,
         duration_sec=args.duration,
