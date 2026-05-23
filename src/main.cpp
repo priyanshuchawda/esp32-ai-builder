@@ -30,6 +30,9 @@
 #ifndef WIFI_CHANNEL
 #define WIFI_CHANNEL 0
 #endif
+#ifndef CSI_PROMISCUOUS_FILTER_MASK
+#define CSI_PROMISCUOUS_FILTER_MASK WIFI_PROMIS_FILTER_MASK_MGMT
+#endif
 
 namespace {
 constexpr uint32_t kBaudRate = 115200;
@@ -244,7 +247,7 @@ bool configureRealCsiCapture() {
   // Keep the stream on management frames only. Data frames increased frame
   // length switching and RSSI spread during live DevKit V1 tests.
   wifi_promiscuous_filter_t filt = {
-      .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
+      .filter_mask = CSI_PROMISCUOUS_FILTER_MASK,
   };
   if (esp_wifi_set_promiscuous_filter(&filt) != ESP_OK) {
     printStatus("PROMISCUOUS_FILTER_FAILED");
