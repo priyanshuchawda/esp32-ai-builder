@@ -25,11 +25,13 @@ try:
     from backend.csi_confidence import evaluate_presence_confidence
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_recommendations import build_signal_recommendations
+    from backend.csi_subcarriers import SubcarrierSelector
 except ImportError:
     from csi_calibration import PresenceCalibration
     from csi_confidence import evaluate_presence_confidence
     from csi_quality import SignalQualityMonitor
     from csi_recommendations import build_signal_recommendations
+    from csi_subcarriers import SubcarrierSelector
 
 # Try importing scipy for butterworth bandpass filters
 try:
@@ -322,6 +324,9 @@ def make_layout(stats, telemetry, dsp):
     net_table.add_row("RSSI:", f"{stats.get('rssi', 'N/A')} dBm")
     net_table.add_row("Noise Floor:", f"{stats.get('noise', 'N/A')} dBm")
     net_table.add_row("Rx Speed (FPS):", f"[bold green]{stats.get('fps', 0.0):.1f} FPS[/bold green]")
+    selected = stats.get("selected_subcarriers", [])
+    if selected:
+        net_table.add_row("Top Subcarriers:", ", ".join(str(index) for index in selected[:8]))
     signal_quality = stats.get("signal_quality", {})
     quality_status = signal_quality.get("status", "BAD")
     quality_reasons = ", ".join(signal_quality.get("reasons", [])[:2]) or "stable"
@@ -379,6 +384,7 @@ def parse_adr018_packet(data):
             "noise": noise,
             "freq_mhz": freq_mhz,
             "n_subcarriers": n_subcarriers,
+            "amplitudes": amplitudes,
             "raw_signal": raw_signal
         }
     except Exception:
@@ -403,6 +409,7 @@ def main():
     # DSP & Stats Inits
     dsp = RuViewDSP(fps=50.0)
     quality_monitor = SignalQualityMonitor()
+    subcarrier_selector = SubcarrierSelector()
     stats = {
         "node_id": "Offline",
         "seq": 0,
@@ -435,8 +442,13 @@ def main():
                         stats.update(packet)
                         stats["signal_quality"] = quality_monitor.summary()
                         
-                        # Add sample to DSP
-                        dsp.add_sample(packet["raw_signal"])
+                        subcarrier_selection = subcarrier_selector.add_frame(packet["amplitudes"])
+                        selected_signal = subcarrier_selection["selected_signal"]
+                        stats["selected_subcarriers"] = subcarrier_selection["selected_indices"]
+                        stats["selected_signal"] = selected_signal
+                        
+                        # Add selected subcarrier signal to DSP
+                        dsp.add_sample(selected_signal)
                         
                         # Update FPS
                         now = time.time()

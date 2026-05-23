@@ -42,6 +42,13 @@ class TestPacketParser(unittest.TestCase):
         # Subcarrier 4: (0**2 + 50**2)**0.5 = 50.0
         # Average: (22.360679774997898 + 181.01933598375618 + 1.0 + 50.0) / 4 = 254.38001575875408 / 4 = 63.59500393968852
         expected_signal = ( (10**2 + 20**2)**0.5 + ((-128)**2 + (-128)**2)**0.5 + ((-1)**2 + 0**2)**0.5 + 50.0 ) / 4
+        expected_amplitudes = [
+            (10**2 + 20**2)**0.5,
+            ((-128)**2 + (-128)**2)**0.5,
+            1.0,
+            50.0,
+        ]
+        self.assertEqual(result["amplitudes"], expected_amplitudes)
         self.assertAlmostEqual(result["raw_signal"], expected_signal, places=4)
 
     def test_parse_invalid_magic(self):

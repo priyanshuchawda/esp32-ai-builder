@@ -14,6 +14,7 @@ from backend.csi_calibration import PresenceCalibration
 from backend.csi_confidence import evaluate_presence_confidence
 from backend.csi_quality import SignalQualityMonitor
 from backend.csi_recommendations import build_signal_recommendations
+from backend.csi_subcarriers import SubcarrierSelector
 
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
 try:
@@ -654,6 +655,7 @@ def parse_adr018_packet(data):
             "noise": noise,
             "freq_mhz": freq_mhz,
             "n_subcarriers": n_subcarriers,
+            "amplitudes": amplitudes,
             "raw_signal": raw_signal
         }
     except Exception:
@@ -690,6 +692,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
     
     dsp = RuViewDSP(fps=50.0)
     quality_monitor = SignalQualityMonitor()
+    subcarrier_selector = SubcarrierSelector()
     packet_counter = 0
     last_fps_time = time.time()
     
@@ -716,7 +719,9 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                 else:
                     fps = dsp.fps
                 
-                dsp.add_sample(packet["raw_signal"])
+                subcarrier_selection = subcarrier_selector.add_frame(packet["amplitudes"])
+                selected_signal = subcarrier_selection["selected_signal"]
+                dsp.add_sample(selected_signal)
                 
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
@@ -733,7 +738,9 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                         "noise": packet["noise"],
                         "freq_mhz": packet["freq_mhz"],
                         "fps": fps,
-                        "signal_quality": signal_quality
+                        "signal_quality": signal_quality,
+                        "selected_subcarriers": subcarrier_selection["selected_indices"],
+                        "selected_signal": selected_signal
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -806,6 +813,7 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
 
     dsp = RuViewDSP(fps=50.0)
     quality_monitor = SignalQualityMonitor()
+    subcarrier_selector = SubcarrierSelector(target_len=6, top_k=3, min_frames=6)
     packet_counter = 0
     serial_seq = 0
     last_fps_time = time.time()
@@ -842,7 +850,9 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                 else:
                     fps = dsp.fps
                 
-                dsp.add_sample(avg_signal)
+                subcarrier_selection = subcarrier_selector.add_frame(bins)
+                selected_signal = subcarrier_selection["selected_signal"]
+                dsp.add_sample(selected_signal)
                 
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
@@ -859,7 +869,9 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                         "noise": -95,
                         "freq_mhz": 2437,
                         "fps": fps,
-                        "signal_quality": signal_quality
+                        "signal_quality": signal_quality,
+                        "selected_subcarriers": subcarrier_selection["selected_indices"],
+                        "selected_signal": selected_signal
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -984,6 +996,7 @@ def generate_simulated_packet(seq, config_dict=None):
 def simulator_loop(shutdown_event, data_queue, config):
     dsp = RuViewDSP(fps=25.0)
     quality_monitor = SignalQualityMonitor()
+    subcarrier_selector = SubcarrierSelector()
     packet_counter = 0
     last_fps_time = time.time()
     seq = 0
@@ -1010,7 +1023,10 @@ def simulator_loop(shutdown_event, data_queue, config):
         else:
             fps = dsp.fps
             
-        dsp.add_sample(packet["raw_signal"])
+        amplitudes = packet.get("amplitudes", [packet["raw_signal"]])
+        subcarrier_selection = subcarrier_selector.add_frame(amplitudes)
+        selected_signal = subcarrier_selection["selected_signal"]
+        dsp.add_sample(selected_signal)
         
         p_thresh = config.get("presence_threshold", 0.6)
         f_thresh = config.get("fall_threshold", 12.0)
@@ -1027,7 +1043,9 @@ def simulator_loop(shutdown_event, data_queue, config):
                 "noise": packet["noise"],
                 "freq_mhz": packet["freq_mhz"],
                 "fps": fps,
-                "signal_quality": signal_quality
+                "signal_quality": signal_quality,
+                "selected_subcarriers": subcarrier_selection["selected_indices"],
+                "selected_signal": selected_signal
             },
             "telemetry": telemetry,
             "raw_history": list(dsp.raw_history),
@@ -1771,6 +1789,8 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     confidence = telemetry.get("presence_confidence") or {}
     confidence_label = confidence.get("label", "ROOM EMPTY")
     human_confirmed = is_human_confirmed(telemetry)
+    selected_subcarriers = stats.get("selected_subcarriers", [])
+    selected_text = ", ".join(str(index) for index in selected_subcarriers[:8]) if selected_subcarriers else "warming up"
     recommendations = telemetry.get("recommendations", [])[:3]
     recommendation_rows = ""
     for item in recommendations:
@@ -1843,6 +1863,11 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
             <span style='color: #8892b0; font-family: monospace;'>Reason</span>
             <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{quality_reason_text}</span>
+        </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Top CSI Bins</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{selected_text}</span>
         </div>
         
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
