@@ -24,6 +24,7 @@ build/
 
 # Local runtime output
 *.log
+backend/data/
 esp32-csi-gemma-filter/python-engine/data/
 
 # OS/editor files
