@@ -526,7 +526,7 @@ function App() {
     setObservatoryMode('live')
     setObservatoryStatus('running')
     setObservatoryError('')
-    fetch(`${API_BASE}/api/observatory-live?mode=live&duration=5&udp_port=5005`)
+    fetch(`${API_BASE}/api/observatory-live?mode=live&duration=3&udp_port=5005`)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Observatory live returned ${response.status}`)
