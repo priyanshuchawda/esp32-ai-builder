@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from backend.esp_live_probe import (
     run_udp_probe,
     summarize_target_ip,
 )
+from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
 
 
 app = FastAPI(title="ESP32 Wi-Fi CSI Spatial Intelligence")
@@ -67,6 +69,8 @@ CAPABILITIES = [
     "Telegram alert path",
 ]
 
+LIVE_ROOM_TRACKER = OnlineRoomStateTracker()
+
 
 @app.get("/api/judge-demo")
 def judge_demo(scenario: str = "occupied_still") -> dict:
@@ -77,15 +81,15 @@ def judge_demo(scenario: str = "occupied_still") -> dict:
         valid = ", ".join(sorted(SCENARIOS))
         raise HTTPException(status_code=400, detail=f"Unknown scenario. Valid scenarios: {valid}")
 
-    scenarios = [build_demo_snapshot(name) for name in sorted(SCENARIOS)]
-    live = build_demo_snapshot("weak_live_stream")
+    scenarios = [_with_room_state(build_demo_snapshot(name)) for name in sorted(SCENARIOS)]
+    live = _with_room_state(build_demo_snapshot("weak_live_stream"))
     live["source"] = "simulated_fallback"
     live["note"] = "Live COM5 capture is available through backend/esp_live_probe.py."
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
         "generated_at": datetime.now(UTC).isoformat(),
-        "selected": build_demo_snapshot(selected_key),
+        "selected": _with_room_state(build_demo_snapshot(selected_key)),
         "scenarios": scenarios,
         "live": live,
         "pipeline": PIPELINE,
@@ -112,7 +116,7 @@ def judge_live(
     except OSError as exc:
         raise HTTPException(status_code=503, detail=f"Live probe failed: {type(exc).__name__}") from exc
 
-    firmware_config = load_firmware_network_config()
+    firmware_config = load_firmware_network_config(path=Path("include/wifi_credentials.h"))
     config_summary = summarize_target_ip(
         target_ip=firmware_config.get("target_ip"),
         local_ip=detect_local_ip(),
@@ -130,7 +134,7 @@ def judge_live(
     )
     overall_status = _line_value(lines[0], "status") or "UNKNOWN"
     next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
-    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint)
+    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, udp_summary)
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
@@ -150,9 +154,11 @@ def judge_live(
     }
 
 
-def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: dict) -> dict:
+def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: dict, udp_summary: dict) -> dict:
     trusted = bool(occupancy.get("trusted"))
     occupied = occupancy.get("class") == "OCCUPIED"
+    snapshot_quality = dict(quality_summary)
+    snapshot_quality["fps"] = udp_summary.get("fps", snapshot_quality.get("fps", 0.0))
     telemetry = {
         "presence": occupied,
         "resp_bpm": 0.0,
@@ -166,15 +172,22 @@ def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: di
         },
         "occupancy": occupancy,
     }
-    return {
+    snapshot = {
         "scenario": "live_probe",
         "source": "actual_udp_probe",
         "note": "Fresh UDP CSI probe from the ESP32 stream.",
         "telemetry": telemetry,
-        "quality": quality_summary,
-        "summary": build_power_summary(telemetry, quality_summary),
+        "quality": snapshot_quality,
+        "summary": build_power_summary(telemetry, snapshot_quality),
         "fingerprint": fingerprint,
     }
+    snapshot["room_state"] = LIVE_ROOM_TRACKER.observe(snapshot)
+    return snapshot
+
+
+def _with_room_state(snapshot: dict) -> dict:
+    snapshot["room_state"] = build_room_state(snapshot)
+    return snapshot
 
 
 def _line_value(line: str, key: str) -> str | None:

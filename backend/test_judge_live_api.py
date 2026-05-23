@@ -26,7 +26,7 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     monkeypatch.setattr("backend.main.run_udp_probe", fake_run_udp_probe)
     monkeypatch.setattr(
         "backend.main.load_firmware_network_config",
-        lambda: {"target_ip": "192.168.29.10", "target_port": 5005},
+        lambda path: {"target_ip": "192.168.29.10", "target_port": 5005},
     )
     monkeypatch.setattr("backend.main.detect_local_ip", lambda: "192.168.29.10")
 
@@ -39,6 +39,9 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["source"] == "actual_udp_probe"
     assert data["overall_status"] == "PASS"
     assert data["udp"]["packets"] == 42
+    assert data["config"]["target_ip"] == "192.168.29.10"
     assert data["snapshot"]["source"] == "actual_udp_probe"
+    assert data["snapshot"]["quality"]["fps"] == 14.0
     assert data["snapshot"]["summary"]["demo_state"] == "OCCUPIED_STILL"
+    assert data["snapshot"]["room_state"]["label"]
     assert data["snapshot"]["fingerprint"]["bars"].isascii()
