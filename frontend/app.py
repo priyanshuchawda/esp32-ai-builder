@@ -9,6 +9,8 @@ import queue
 from collections import deque
 import plotly.graph_objects as go
 
+from backend.csi_calibration import PresenceCalibration
+
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
 try:
     from scipy.signal import butter, lfilter
@@ -139,6 +141,17 @@ def get_global_resources():
         "fall_alert": False,
         "acceleration": 0.0,
         "rep_count": 0,
+        "effective_presence_threshold": 0.6,
+        "calibration": {
+            "ready": False,
+            "active": False,
+            "samples": 0,
+            "target_samples": 60,
+            "baseline_mean": 0.0,
+            "baseline_variance": 0.0,
+            "baseline_std": 0.0,
+            "threshold": 0.6
+        },
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -181,7 +194,10 @@ def get_global_resources():
         "shutdown_event": threading.Event(),
         "config": {
             "presence_threshold": 0.6,
-            "fall_threshold": 12.0
+            "fall_threshold": 12.0,
+            "calibration_active": False,
+            "calibration_reset_requested": False,
+            "calibration_target_samples": 60
         }
     }
 
@@ -335,12 +351,27 @@ class RuViewDSP:
         # Sleep Apnea & Hypopnea Screener
         self.apnea_detector = ApneaDetector()
         self.last_apnea_check_time = 0.0
+        self.presence_calibration = PresenceCalibration(active=False)
         
         # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
         self._filter_cache = {}
+
+    def start_presence_calibration(self, target_samples=60):
+        self.presence_calibration = PresenceCalibration(
+            min_samples=target_samples,
+            min_threshold=0.6,
+            active=True,
+        )
+        return self.presence_calibration.summary()
+
+    def reset_presence_calibration(self):
+        self.presence_calibration = PresenceCalibration(active=False)
+        return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
         self.raw_history.append(raw_val)
+        if self.presence_calibration.active:
+            self.presence_calibration.add_sample(raw_val)
         
         # 1. Apply EMA Lowpass Denoising (Alpha = 0.2)
         alpha = 0.2
@@ -396,6 +427,9 @@ class RuViewDSP:
         return EMA_fast - EMA_slow
 
     def process_telemetry(self, presence_threshold, fall_threshold):
+        calibration_summary = self.presence_calibration.summary()
+        effective_presence_threshold = self.presence_calibration.effective_threshold(presence_threshold)
+
         if len(self.filtered_history) < 30:
             return {
                 "presence": False,
@@ -405,6 +439,8 @@ class RuViewDSP:
                 "fall_alert": False,
                 "acceleration": 0.0,
                 "rep_count": 0,
+                "effective_presence_threshold": effective_presence_threshold,
+                "calibration": calibration_summary,
                 "apnea_status": {
                     "is_apnea": False,
                     "is_hypopnea": False,
@@ -436,7 +472,7 @@ class RuViewDSP:
         variance = np.var(recent_raw)
         std_dev = np.std(recent_raw)
         
-        presence = (variance > presence_threshold) or (std_dev > (presence_threshold * 0.8))
+        presence = (variance > effective_presence_threshold) or (std_dev > (effective_presence_threshold * 0.8))
         
         # Track presence for auto-reset of rep count
         now = time.time()
@@ -502,6 +538,8 @@ class RuViewDSP:
             "fall_alert": fall_alert,
             "acceleration": acceleration,
             "rep_count": self.rep_count,
+            "effective_presence_threshold": effective_presence_threshold,
+            "calibration": self.presence_calibration.summary(),
             "apnea_status": {
                 "is_apnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "apnea",
                 "is_hypopnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "hypopnea",
@@ -565,6 +603,20 @@ def parse_adr018_packet(data):
     except Exception:
         return None
 
+def apply_calibration_controls(dsp, config):
+    if config.get("calibration_reset_requested", False):
+        dsp.reset_presence_calibration()
+        config["calibration_reset_requested"] = False
+
+    if config.get("calibration_active", False) and not dsp.presence_calibration.active:
+        target_samples = int(config.get("calibration_target_samples", 60))
+        dsp.start_presence_calibration(target_samples=target_samples)
+
+def update_calibration_config(config, telemetry):
+    calibration = telemetry.get("calibration", {})
+    if calibration.get("ready") and not calibration.get("active"):
+        config["calibration_active"] = False
+
 def udp_receiver_loop(port, shutdown_event, data_queue, config):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -589,6 +641,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
             data, addr = sock.recvfrom(4096)
             packet = parse_adr018_packet(data)
             if packet:
+                apply_calibration_controls(dsp, config)
                 packet_counter += 1
                 now = time.time()
                 if now - last_fps_time >= 1.0:
@@ -605,6 +658,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
+                update_calibration_config(config, telemetry)
                 
                 ui_package = {
                     "stats": {
@@ -633,9 +687,11 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
             # Report offline status if no packets received for 3 seconds
             now = time.time()
             if now - last_fps_time > 3.0:
+                apply_calibration_controls(dsp, config)
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
+                update_calibration_config(config, telemetry)
                 telemetry["presence"] = False
                 
                 ui_package = {
@@ -691,6 +747,7 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
             
             parts = line.split(",")
             if len(parts) >= 8:
+                apply_calibration_controls(dsp, config)
                 ts = int(parts[0])
                 rssi = int(parts[1])
                 bins = [float(x) for x in parts[2:8]]
@@ -712,6 +769,7 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
+                update_calibration_config(config, telemetry)
                 
                 ui_package = {
                     "stats": {
@@ -849,6 +907,7 @@ def simulator_loop(shutdown_event, data_queue, config):
     seq = 0
     
     while not shutdown_event.is_set():
+        apply_calibration_controls(dsp, config)
         packet = generate_simulated_packet(seq, config)
         seq += 1
         packet_counter += 1
@@ -868,6 +927,7 @@ def simulator_loop(shutdown_event, data_queue, config):
         p_thresh = config.get("presence_threshold", 0.6)
         f_thresh = config.get("fall_threshold", 12.0)
         telemetry = dsp.process_telemetry(p_thresh, f_thresh)
+        update_calibration_config(config, telemetry)
         
         ui_package = {
             "stats": {
@@ -913,6 +973,17 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
         "fall_alert": False,
         "acceleration": 0.0,
         "rep_count": 0,
+        "effective_presence_threshold": 0.6,
+        "calibration": {
+            "ready": False,
+            "active": False,
+            "samples": 0,
+            "target_samples": 60,
+            "baseline_mean": 0.0,
+            "baseline_variance": 0.0,
+            "baseline_std": 0.0,
+            "threshold": 0.6
+        },
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -1298,10 +1369,35 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Calibration Settings")
 presence_threshold = st.sidebar.slider("Presence Var Threshold", min_value=0.1, max_value=5.0, value=0.6, step=0.05)
 fall_accel_threshold = st.sidebar.slider("Fall Acceleration Threshold", min_value=5.0, max_value=30.0, value=12.0, step=0.5)
+calibration_target_samples = st.sidebar.number_input("Empty Calibration Samples", min_value=30, max_value=300, value=60, step=10)
+
+cal_col1, cal_col2 = st.sidebar.columns(2)
+start_calibration = cal_col1.button("Calibrate Empty")
+reset_calibration = cal_col2.button("Reset Cal")
 
 # Dynamically update background thread configuration
 config["presence_threshold"] = presence_threshold
 config["fall_threshold"] = fall_accel_threshold
+config["calibration_target_samples"] = calibration_target_samples
+
+if start_calibration:
+    config["calibration_reset_requested"] = True
+    config["calibration_active"] = True
+
+if reset_calibration:
+    config["calibration_reset_requested"] = True
+    config["calibration_active"] = False
+
+with resources["lock"]:
+    sidebar_package = resources.get("latest_package", {})
+sidebar_calibration = sidebar_package.get("telemetry", {}).get("calibration", {})
+if sidebar_calibration:
+    cal_state = "READY" if sidebar_calibration.get("ready") else "ACTIVE" if sidebar_calibration.get("active") else "MANUAL"
+    st.sidebar.caption(
+        f"Calibration: {cal_state} | "
+        f"{sidebar_calibration.get('samples', 0)}/{sidebar_calibration.get('target_samples', calibration_target_samples)} samples | "
+        f"threshold {sidebar_calibration.get('threshold', presence_threshold):.2f}"
+    )
 
 st.sidebar.markdown("---")
 st.sidebar.write("### Controller")
@@ -1351,6 +1447,17 @@ standby_telemetry = {
     "fall_alert": False,
     "acceleration": 0.0,
     "rep_count": 0,
+    "effective_presence_threshold": 0.6,
+    "calibration": {
+        "ready": False,
+        "active": False,
+        "samples": 0,
+        "target_samples": 60,
+        "baseline_mean": 0.0,
+        "baseline_variance": 0.0,
+        "baseline_std": 0.0,
+        "threshold": 0.6
+    },
     "apnea_status": {
         "is_apnea": False,
         "is_hypopnea": False,
@@ -1605,6 +1712,9 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
 
 def draw_presence(telemetry, container):
     presence = telemetry.get("presence", False)
+    effective_threshold = telemetry.get("effective_presence_threshold", 0.0)
+    calibration = telemetry.get("calibration", {})
+    calibration_state = "READY" if calibration.get("ready") else "ACTIVE" if calibration.get("active") else "MANUAL"
     
     if presence:
         presence_badge = """
@@ -1623,6 +1733,14 @@ def draw_presence(telemetry, container):
     <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 15px; background-color: #0c0f13; margin-bottom: 15px; box-sizing: border-box;'>
         <div style='color: #8892b0; font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; font-weight: bold; text-align: left;'>PRESENCE</div>
         {presence_badge}
+        <div style='display: flex; justify-content: space-between; margin-top: 12px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Threshold</span>
+            <span style='font-weight: bold; color: #00ffcc; font-family: monospace;'>{effective_threshold:.2f}</span>
+        </div>
+        <div style='display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Calibration</span>
+            <span style='font-weight: bold; color: #00ffcc; font-family: monospace;'>{calibration_state}</span>
+        </div>
     </div>
     """
     container.markdown(html, unsafe_allow_html=True)
