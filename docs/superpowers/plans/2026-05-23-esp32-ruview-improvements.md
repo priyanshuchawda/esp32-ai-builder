@@ -36,3 +36,9 @@
 - [x] Combine calibration status, signal quality, and presence decision into confidence.
 - [x] Gate Telegram/AI summary wording behind confidence.
 - [x] Verify low-confidence suppression and high-confidence alert paths.
+
+### Issue #29: Live Signal-Health Recommendations
+
+- [x] Map quality/confidence failures to clear setup actions.
+- [x] Show recommendations in Streamlit and terminal views.
+- [x] Verify recommendation logic with focused tests.
