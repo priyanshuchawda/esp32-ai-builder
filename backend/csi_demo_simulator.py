@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 
+from backend.csi_fingerprint import build_fingerprint, format_fingerprint_lines
 from backend.csi_power_summary import build_power_summary, format_power_summary_lines
 
 
@@ -86,6 +87,7 @@ def build_demo_snapshot(scenario: str) -> dict:
         "telemetry": telemetry,
         "quality": quality,
         "summary": build_power_summary(telemetry, quality),
+        "fingerprint": build_fingerprint(_scenario_amplitudes(key), bins=16),
     }
 
 
@@ -94,6 +96,7 @@ def format_demo_snapshot(snapshot: dict) -> list[str]:
     quality = snapshot["quality"]
     lines = [f"DEMO_SCENARIO {snapshot['scenario']}"]
     lines.extend(format_power_summary_lines(snapshot["summary"], prefix="SIM_DEMO"))
+    lines.extend(format_fingerprint_lines(snapshot["fingerprint"], prefix="SIM_FINGERPRINT"))
     lines.extend(
         [
             f"SIM_METRIC quality={quality.get('status')} fps={quality.get('fps')}",
@@ -111,6 +114,17 @@ def format_demo_snapshot(snapshot: dict) -> list[str]:
         ]
     )
     return lines
+
+
+def _scenario_amplitudes(scenario):
+    base_shapes = {
+        "empty_room": [12, 12, 13, 12, 12, 13, 12, 12, 12, 13, 12, 12, 13, 12, 12, 12],
+        "occupied_still": [13, 14, 15, 18, 22, 25, 24, 21, 18, 16, 15, 17, 21, 24, 20, 16],
+        "walking": [14, 20, 28, 18, 25, 34, 21, 30, 17, 26, 36, 22, 31, 19, 27, 35],
+        "fall_event": [12, 15, 19, 28, 42, 55, 39, 24, 18, 21, 33, 48, 36, 20, 15, 13],
+        "weak_live_stream": [10, 30, 12, 34, 11, 29, 13, 36, 12, 33, 14, 31, 10, 35, 11, 32],
+    }
+    return base_shapes.get(scenario, base_shapes["empty_room"])
 
 
 def main(argv: list[str] | None = None) -> int:

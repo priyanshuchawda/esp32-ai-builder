@@ -23,6 +23,7 @@ class TestCsiDemoSimulator(unittest.TestCase):
 
         self.assertIn("DEMO_SCENARIO walking", lines)
         self.assertIn("SIM_DEMO state=OCCUPIED_MOVING confidence=HIGH", lines)
+        self.assertTrue(any(line.startswith("SIM_FINGERPRINT bars=") for line in lines))
         self.assertTrue(any(line.startswith("SIM_METRIC") for line in lines))
 
 
