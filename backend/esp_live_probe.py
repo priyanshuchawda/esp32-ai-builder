@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -31,13 +32,14 @@ def build_probe_lines(
     *,
     issue: int | None,
     duration_sec: int,
+    config_summary: dict | None = None,
     udp_summary: dict,
     quality_summary: dict,
     modes: dict[int, int],
     occupancy: dict,
     serial_result: SerialProbeResult | None = None,
 ) -> list[str]:
-    status = _overall_status(udp_summary, quality_summary, serial_result)
+    status = _overall_status(udp_summary, quality_summary, serial_result, config_summary)
     issue_part = f"issue={issue} " if issue is not None else ""
     lines = [
         f"LIVE_PROBE {issue_part}status={status} duration_sec={duration_sec}".strip(),
@@ -48,8 +50,19 @@ def build_probe_lines(
             f"fps={udp_summary.get('fps', 0.0)} "
             f"reason={udp_summary.get('reason', 'unknown')}"
         ),
-        f"MODES {_format_modes(modes)}",
     ]
+
+    if config_summary is not None:
+        lines.append(
+            "CONFIG_STATUS "
+            f"{config_summary.get('status')} "
+            f"target_ip={config_summary.get('target_ip', 'unknown')} "
+            f"local_ip={config_summary.get('local_ip', 'unknown')} "
+            f"target_port={config_summary.get('target_port', 'unknown')} "
+            f"reason={config_summary.get('reason', 'unknown')}"
+        )
+
+    lines.append(f"MODES {_format_modes(modes)}")
 
     if serial_result is not None:
         serial_line = (
@@ -129,6 +142,67 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     return udp_summary, quality_summary, modes, occupancy
 
 
+def load_firmware_network_config(path: Path | None = None, text: str | None = None) -> dict:
+    if text is None:
+        if path is None or not path.exists():
+            return {}
+        text = path.read_text(encoding="utf-8", errors="replace")
+
+    target_ip = _read_define_string(text, "TARGET_IP")
+    target_port = _read_define_int(text, "TARGET_PORT")
+    config = {}
+    if target_ip:
+        config["target_ip"] = target_ip
+    if target_port is not None:
+        config["target_port"] = target_port
+    return config
+
+
+def summarize_target_ip(target_ip: str | None, local_ip: str | None, target_port: int | None = None) -> dict:
+    if not target_ip:
+        return {
+            "status": "WARN",
+            "reason": "target_ip_missing",
+            "target_ip": "unknown",
+            "local_ip": local_ip or "unknown",
+            "target_port": target_port or "unknown",
+        }
+    if not local_ip:
+        return {
+            "status": "WARN",
+            "reason": "local_ip_unknown",
+            "target_ip": target_ip,
+            "local_ip": "unknown",
+            "target_port": target_port or "unknown",
+        }
+    if target_ip != local_ip:
+        return {
+            "status": "FAIL",
+            "reason": "target_ip_mismatch",
+            "target_ip": target_ip,
+            "local_ip": local_ip,
+            "target_port": target_port or "unknown",
+        }
+    return {
+        "status": "PASS",
+        "reason": "ok",
+        "target_ip": target_ip,
+        "local_ip": local_ip,
+        "target_port": target_port or "unknown",
+    }
+
+
+def detect_local_ip() -> str | None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
 def probe_serial(port: str, baud: int, seconds: float) -> SerialProbeResult:
     try:
         import serial
@@ -161,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--serial-port")
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--serial-seconds", type=float, default=5.0)
+    parser.add_argument("--credentials", type=Path, default=Path("include/wifi_credentials.h"))
     parser.add_argument("--issue", type=int, default=None)
     parser.add_argument("--ai-log", type=Path)
     args = parser.parse_args(argv)
@@ -175,9 +250,16 @@ def main(argv: list[str] | None = None) -> int:
         duration_sec=args.duration,
         min_fps=args.min_fps,
     )
+    firmware_config = load_firmware_network_config(path=args.credentials)
+    config_summary = summarize_target_ip(
+        target_ip=firmware_config.get("target_ip"),
+        local_ip=detect_local_ip(),
+        target_port=firmware_config.get("target_port"),
+    )
     lines = build_probe_lines(
         issue=args.issue,
         duration_sec=args.duration,
+        config_summary=config_summary,
         udp_summary=udp_summary,
         quality_summary=quality_summary,
         modes=modes,
@@ -195,7 +277,14 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if lines[0].startswith("LIVE_PROBE") and "status=FAIL" in lines[0] else 0
 
 
-def _overall_status(udp_summary: dict, quality_summary: dict, serial_result: SerialProbeResult | None) -> str:
+def _overall_status(
+    udp_summary: dict,
+    quality_summary: dict,
+    serial_result: SerialProbeResult | None,
+    config_summary: dict | None,
+) -> str:
+    if config_summary is not None and config_summary.get("status") == "FAIL":
+        return "FAIL"
     if udp_summary.get("status") == "FAIL" or quality_summary.get("status") == "BAD":
         return "FAIL"
     if serial_result is not None and serial_result.status == "FAIL":
@@ -203,6 +292,16 @@ def _overall_status(udp_summary: dict, quality_summary: dict, serial_result: Ser
     if udp_summary.get("status") == "WARN" or quality_summary.get("status") == "WEAK":
         return "WARN"
     return "PASS"
+
+
+def _read_define_string(text: str, name: str) -> str | None:
+    match = re.search(rf"^\s*#define\s+{re.escape(name)}\s+\"([^\"]+)\"", text, flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _read_define_int(text: str, name: str) -> int | None:
+    match = re.search(rf"^\s*#define\s+{re.escape(name)}\s+(\d+)", text, flags=re.MULTILINE)
+    return int(match.group(1)) if match else None
 
 
 def _format_modes(modes: dict[int, int]) -> str:
