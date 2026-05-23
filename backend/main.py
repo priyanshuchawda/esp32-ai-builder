@@ -115,7 +115,7 @@ def judge_live(
     """Run a short real UDP CSI probe and return dashboard-ready live data."""
 
     try:
-        udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram, motion_cadence = run_udp_probe(
+        udp_summary, quality_summary, modes, occupancy, telemetry, fingerprint, spectrogram, motion_cadence = run_udp_probe(
             bind_ip=bind_ip,
             udp_port=udp_port,
             duration_sec=duration,
@@ -142,7 +142,7 @@ def judge_live(
     )
     overall_status = _line_value(lines[0], "status") or "UNKNOWN"
     next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
-    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, spectrogram, udp_summary, motion_cadence)
+    snapshot = _build_live_snapshot(occupancy, telemetry, quality_summary, fingerprint, spectrogram, udp_summary, motion_cadence)
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
@@ -155,6 +155,7 @@ def judge_live(
         "modes": {str(mode): count for mode, count in modes.items()},
         "config": config_summary,
         "occupancy": occupancy,
+        "telemetry": snapshot["telemetry"],
         "fingerprint": fingerprint,
         "spectrogram": spectrogram,
         "motion_cadence": motion_cadence,
@@ -166,6 +167,7 @@ def judge_live(
 
 def _build_live_snapshot(
     occupancy: dict,
+    telemetry: dict,
     quality_summary: dict,
     fingerprint: dict,
     spectrogram: dict,
@@ -176,19 +178,7 @@ def _build_live_snapshot(
     occupied = occupancy.get("class") == "OCCUPIED"
     snapshot_quality = dict(quality_summary)
     snapshot_quality["fps"] = udp_summary.get("fps", snapshot_quality.get("fps", 0.0))
-    telemetry = {
-        "presence": occupied,
-        "resp_bpm": 0.0,
-        "heart_bpm": 0.0,
-        "fall_detected": False,
-        "variance": round(float(fingerprint.get("spread", 0.0)), 2),
-        "motion": {
-            "display_level": "STILL" if trusted and occupied else "UNSTABLE",
-            "score": 0.0,
-            "trusted": trusted,
-        },
-        "occupancy": occupancy,
-    }
+    telemetry = _normalize_live_telemetry(telemetry, occupancy, fingerprint, trusted, occupied)
     snapshot = {
         "scenario": "live_probe",
         "source": "actual_udp_probe",
@@ -207,6 +197,33 @@ def _build_live_snapshot(
     snapshot["material_change"] = material_change
     snapshot["person_count"] = estimate_person_count(snapshot)
     return snapshot
+
+
+def _normalize_live_telemetry(
+    telemetry: dict,
+    occupancy: dict,
+    fingerprint: dict,
+    trusted: bool,
+    occupied: bool,
+) -> dict:
+    normalized = dict(telemetry or {})
+    normalized["presence"] = bool(normalized.get("presence", occupied))
+    normalized["resp_bpm"] = round(float(normalized.get("resp_bpm", 0.0) or 0.0), 1)
+    normalized["heart_bpm"] = round(float(normalized.get("heart_bpm", 0.0) or 0.0), 1)
+    normalized["fall_detected"] = bool(normalized.get("fall_detected", normalized.get("fall_alert", False)))
+    normalized["variance"] = round(float(normalized.get("variance", fingerprint.get("spread", 0.0)) or 0.0), 2)
+    normalized["rep_count"] = int(normalized.get("rep_count", 0) or 0)
+    normalized["acceleration"] = round(float(normalized.get("acceleration", 0.0) or 0.0), 2)
+    normalized["motion"] = dict(
+        normalized.get("motion")
+        or {
+            "display_level": "STILL" if trusted and occupied else "UNSTABLE",
+            "score": 0.0,
+            "trusted": trusted,
+        }
+    )
+    normalized["occupancy"] = occupancy
+    return normalized
 
 
 def _with_room_state(snapshot: dict) -> dict:

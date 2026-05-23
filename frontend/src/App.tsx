@@ -30,6 +30,8 @@ type Telemetry = {
   heart_bpm: number
   fall_detected: boolean
   variance: number
+  rep_count?: number
+  acceleration?: number
   motion: {
     display_level: string
     score: number
@@ -596,6 +598,12 @@ function App() {
                   : liveRoomState?.label ?? (live.source ?? 'live').replaceAll('_', ' ')
               }
             />
+            <Metric
+              icon={<AlertTriangle size={18} />}
+              label="Fall"
+              value={live.telemetry.fall_detected ? 'alert' : 'clear'}
+            />
+            <Metric icon={<Activity size={18} />} label="Reps" value={String(live.telemetry.rep_count ?? 0)} />
           </div>
           {liveMotionCadence ? <MotionCadenceStrip motionCadence={liveMotionCadence} compact /> : null}
           {livePersonCount ? <PersonCountStrip personCount={livePersonCount} compact /> : null}

@@ -20,6 +20,16 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
             {"status": "GOOD", "fps": 14.0, "reasons": []},
             {128: 42},
             {"class": "OCCUPIED", "trusted": True, "reasons": []},
+            {
+                "presence": True,
+                "resp_bpm": 14.8,
+                "heart_bpm": 72.0,
+                "fall_alert": True,
+                "rep_count": 3,
+                "acceleration": 13.5,
+                "variance": 19.2,
+                "motion": {"display_level": "HIGH", "score": 4.2, "trusted": True},
+            },
             {"bins": 16, "mean": 21.5, "spread": 8.0, "bars": "..::==++**##--__"},
             {"source": "live_udp_frames", "time_bins": 3, "subcarrier_bins": 4, "rows": [[0, 20, 60, 100]], "ascii": ".-*#"},
             {
@@ -52,7 +62,12 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["config"]["target_ip"] == "192.168.29.10"
     assert data["snapshot"]["source"] == "actual_udp_probe"
     assert data["snapshot"]["quality"]["fps"] == 14.0
-    assert data["snapshot"]["summary"]["demo_state"] == "OCCUPIED_STILL"
+    assert data["snapshot"]["telemetry"]["resp_bpm"] == 14.8
+    assert data["snapshot"]["telemetry"]["heart_bpm"] == 72.0
+    assert data["snapshot"]["telemetry"]["fall_detected"] is True
+    assert data["snapshot"]["telemetry"]["rep_count"] == 3
+    assert data["snapshot"]["telemetry"]["motion"]["display_level"] == "HIGH"
+    assert data["snapshot"]["summary"]["demo_state"] == "FALL_EVENT"
     assert data["snapshot"]["room_state"]["label"]
     assert data["snapshot"]["fingerprint"]["bars"].isascii()
     assert data["snapshot"]["spectrogram"]["source"] == "live_udp_frames"
