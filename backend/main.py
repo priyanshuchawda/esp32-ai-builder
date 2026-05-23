@@ -20,6 +20,7 @@ from backend.esp_live_probe import (
 )
 from backend.material_change import MaterialChangeTracker, build_demo_material_change, fingerprint_to_amplitudes
 from backend.motion_cadence import build_demo_motion_cadence
+from backend.person_count import estimate_person_count
 from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
 
 
@@ -70,6 +71,7 @@ CAPABILITIES = [
     "CSI fingerprint",
     "material change watch",
     "motion cadence watch",
+    "single-link person count",
     "quality gating",
     "Telegram alert path",
 ]
@@ -203,6 +205,7 @@ def _build_live_snapshot(
     material_change["trusted"] = snapshot_quality.get("status") == "GOOD"
     material_change["trust_reason"] = "quality_good" if material_change["trusted"] else "signal_quality_not_good"
     snapshot["material_change"] = material_change
+    snapshot["person_count"] = estimate_person_count(snapshot)
     return snapshot
 
 
@@ -215,6 +218,7 @@ def _with_room_state(snapshot: dict) -> dict:
         "quality_good" if snapshot["material_change"]["trusted"] else "signal_quality_not_good"
     )
     snapshot["motion_cadence"] = build_demo_motion_cadence(snapshot)
+    snapshot["person_count"] = estimate_person_count(snapshot)
     return snapshot
 
 

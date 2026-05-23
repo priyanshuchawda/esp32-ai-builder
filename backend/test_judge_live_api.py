@@ -62,6 +62,7 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["snapshot"]["material_change"]["trust_reason"] == "quality_good"
     assert data["snapshot"]["motion_cadence"]["state"] == "walking"
     assert data["motion_cadence"]["cadence_spm"] == 96.0
+    assert data["snapshot"]["person_count"]["range"] == "1"
 
 
 def test_judge_live_material_tracker_uses_short_dashboard_baseline():

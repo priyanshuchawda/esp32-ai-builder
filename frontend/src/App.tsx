@@ -100,6 +100,15 @@ type MotionCadence = {
   trust_reason: string
 }
 
+type PersonCount = {
+  estimate: number
+  range: string
+  label: string
+  confidence: string
+  trusted: boolean
+  reasons: string[]
+}
+
 type ScenarioSnapshot = {
   scenario: string
   telemetry: Telemetry
@@ -110,6 +119,7 @@ type ScenarioSnapshot = {
   spectrogram?: Spectrogram
   material_change?: MaterialChange
   motion_cadence?: MotionCadence
+  person_count?: PersonCount
   source?: string
   note?: string
 }
@@ -195,6 +205,14 @@ const fallbackPayload: DemoPayload = {
       sample_count: 80,
       trust_reason: 'low_motion_energy',
     },
+    person_count: {
+      estimate: 1,
+      range: '1',
+      label: 'single occupied zone',
+      confidence: 'high',
+      trusted: true,
+      reasons: ['single_link_estimate'],
+    },
   },
   scenarios: [
     {
@@ -227,6 +245,14 @@ const fallbackPayload: DemoPayload = {
         sample_count: 80,
         trust_reason: 'low_motion_energy',
       },
+      person_count: {
+        estimate: 0,
+        range: '0',
+        label: 'empty room',
+        confidence: 'high',
+        trusted: true,
+        reasons: ['trusted_empty_baseline'],
+      },
     },
     {
       scenario: 'occupied_still',
@@ -257,6 +283,14 @@ const fallbackPayload: DemoPayload = {
         stride_regularity: 0,
         sample_count: 80,
         trust_reason: 'low_motion_energy',
+      },
+      person_count: {
+        estimate: 1,
+        range: '1',
+        label: 'single occupied zone',
+        confidence: 'high',
+        trusted: true,
+        reasons: ['single_link_estimate'],
       },
     },
   ],
@@ -291,6 +325,14 @@ const fallbackPayload: DemoPayload = {
       stride_regularity: 0,
       sample_count: 0,
       trust_reason: 'signal_quality_not_good',
+    },
+    person_count: {
+      estimate: 0,
+      range: 'unknown',
+      label: 'count blocked',
+      confidence: 'low',
+      trusted: false,
+      reasons: ['signal_quality_not_good'],
     },
   },
   pipeline: [
@@ -402,6 +444,8 @@ function App() {
   const liveMaterialChange = live.material_change
   const motionCadence = selected.motion_cadence
   const liveMotionCadence = live.motion_cadence
+  const personCount = selected.person_count
+  const livePersonCount = live.person_count
   const selectedValues = useMemo(
     () => fingerprintValues(selected.fingerprint.bars),
     [selected.fingerprint.bars],
@@ -476,6 +520,7 @@ function App() {
           ) : null}
           {materialChange ? <MaterialChangeStrip materialChange={materialChange} /> : null}
           {motionCadence ? <MotionCadenceStrip motionCadence={motionCadence} /> : null}
+          {personCount ? <PersonCountStrip personCount={personCount} /> : null}
           <div className="metric-grid">
             <Metric icon={<UserRound size={18} />} label="Occupancy" value={selected.telemetry.occupancy.class} />
             <Metric icon={<Activity size={18} />} label="Motion" value={selected.telemetry.motion.display_level} />
@@ -553,6 +598,7 @@ function App() {
             />
           </div>
           {liveMotionCadence ? <MotionCadenceStrip motionCadence={liveMotionCadence} compact /> : null}
+          {livePersonCount ? <PersonCountStrip personCount={livePersonCount} compact /> : null}
           <p className={`muted ${liveProbeStatus === 'error' ? 'error' : ''}`}>
             {liveProbeStatus === 'error'
               ? liveProbeError
@@ -600,6 +646,24 @@ function App() {
         </article>
       </section>
     </main>
+  )
+}
+
+function PersonCountStrip({ personCount, compact = false }: { personCount: PersonCount; compact?: boolean }) {
+  const detail = personCount.trusted ? personCount.confidence : personCount.reasons[0]?.replaceAll('_', ' ')
+
+  return (
+    <div className={`count-strip ${personCount.trusted ? 'trusted' : ''} ${compact ? 'compact' : ''}`}>
+      <span>
+        <strong>{personCount.range}</strong>
+        single-link count
+      </span>
+      <span>
+        <strong>{personCount.label}</strong>
+        {detail}
+      </span>
+      <code>{personCount.confidence}</code>
+    </div>
   )
 }
 
