@@ -18,8 +18,13 @@ from backend.esp_live_probe import (
     run_udp_probe,
     summarize_target_ip,
 )
-from backend.material_change import MaterialChangeTracker, build_demo_material_change, fingerprint_to_amplitudes
+from backend.material_change import (
+    MaterialChangeTracker,
+    build_demo_material_change,
+    fingerprint_to_amplitudes,
+)
 from backend.motion_cadence import build_demo_motion_cadence
+from backend.observatory_state import build_observatory_state
 from backend.person_count import estimate_person_count
 from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
 
@@ -87,9 +92,13 @@ def judge_demo(scenario: str = "occupied_still") -> dict:
     selected_key = scenario.lower()
     if selected_key not in SCENARIOS:
         valid = ", ".join(sorted(SCENARIOS))
-        raise HTTPException(status_code=400, detail=f"Unknown scenario. Valid scenarios: {valid}")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown scenario. Valid scenarios: {valid}"
+        )
 
-    scenarios = [_with_room_state(build_demo_snapshot(name)) for name in sorted(SCENARIOS)]
+    scenarios = [
+        _with_room_state(build_demo_snapshot(name)) for name in sorted(SCENARIOS)
+    ]
     live = _with_room_state(build_demo_snapshot("weak_live_stream"))
     live["source"] = "simulated_fallback"
     live["note"] = "Live COM5 capture is available through backend/esp_live_probe.py."
@@ -115,16 +124,29 @@ def judge_live(
     """Run a short real UDP CSI probe and return dashboard-ready live data."""
 
     try:
-        udp_summary, quality_summary, modes, occupancy, telemetry, fingerprint, spectrogram, motion_cadence = run_udp_probe(
+        (
+            udp_summary,
+            quality_summary,
+            modes,
+            occupancy,
+            telemetry,
+            fingerprint,
+            spectrogram,
+            motion_cadence,
+        ) = run_udp_probe(
             bind_ip=bind_ip,
             udp_port=udp_port,
             duration_sec=duration,
             min_fps=min_fps,
         )
     except OSError as exc:
-        raise HTTPException(status_code=503, detail=f"Live probe failed: {type(exc).__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Live probe failed: {type(exc).__name__}"
+        ) from exc
 
-    firmware_config = load_firmware_network_config(path=Path("include/wifi_credentials.h"))
+    firmware_config = load_firmware_network_config(
+        path=Path("include/wifi_credentials.h")
+    )
     config_summary = summarize_target_ip(
         target_ip=firmware_config.get("target_ip"),
         local_ip=detect_local_ip(),
@@ -141,8 +163,18 @@ def judge_live(
         occupancy=occupancy,
     )
     overall_status = _line_value(lines[0], "status") or "UNKNOWN"
-    next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
-    snapshot = _build_live_snapshot(occupancy, telemetry, quality_summary, fingerprint, spectrogram, udp_summary, motion_cadence)
+    next_actions = [
+        line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")
+    ]
+    snapshot = _build_live_snapshot(
+        occupancy,
+        telemetry,
+        quality_summary,
+        fingerprint,
+        spectrogram,
+        udp_summary,
+        motion_cadence,
+    )
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
@@ -165,6 +197,81 @@ def judge_live(
     }
 
 
+@app.get("/api/observatory-live")
+def observatory_live(
+    mode: str = Query(default="live", pattern="^(live|demo)$"),
+    scenario: str = "occupied_still",
+    duration: int = Query(default=3, ge=1, le=15),
+    bind_ip: str = "0.0.0.0",
+    udp_port: int = Query(default=5005, ge=1, le=65535),
+    min_fps: float = Query(default=5.0, ge=0.1, le=100.0),
+) -> dict:
+    """Return a visualization-first live contract for the 3D Observatory mode."""
+
+    if mode == "demo":
+        selected_key = scenario.lower()
+        if selected_key not in SCENARIOS:
+            valid = ", ".join(sorted(SCENARIOS))
+            raise HTTPException(
+                status_code=400, detail=f"Unknown scenario. Valid scenarios: {valid}"
+            )
+        snapshot = _with_room_state(build_demo_snapshot(selected_key))
+        state = build_observatory_state(snapshot, source="demo")
+        state["title"] = "ESP32 Wi-Fi CSI Observatory"
+        state["generated_at"] = datetime.now(UTC).isoformat()
+        return state
+
+    try:
+        (
+            udp_summary,
+            quality_summary,
+            _modes,
+            occupancy,
+            telemetry,
+            fingerprint,
+            spectrogram,
+            motion_cadence,
+        ) = run_udp_probe(
+            bind_ip=bind_ip,
+            udp_port=udp_port,
+            duration_sec=duration,
+            min_fps=min_fps,
+        )
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Live probe failed: {type(exc).__name__}"
+        ) from exc
+
+    snapshot = _build_live_snapshot(
+        occupancy,
+        telemetry,
+        quality_summary,
+        fingerprint,
+        spectrogram,
+        udp_summary,
+        motion_cadence,
+    )
+    firmware_config = load_firmware_network_config(
+        path=Path("include/wifi_credentials.h")
+    )
+    config_summary = summarize_target_ip(
+        target_ip=firmware_config.get("target_ip"),
+        local_ip=detect_local_ip(),
+        target_port=firmware_config.get("target_port"),
+    )
+    state = build_observatory_state(
+        snapshot,
+        source="actual_udp_probe",
+        udp_summary=udp_summary,
+        config=config_summary,
+    )
+    state["title"] = "ESP32 Wi-Fi CSI Observatory"
+    state["generated_at"] = datetime.now(UTC).isoformat()
+    state["duration_sec"] = duration
+    state["udp"] = udp_summary
+    return state
+
+
 def _build_live_snapshot(
     occupancy: dict,
     telemetry: dict,
@@ -178,7 +285,9 @@ def _build_live_snapshot(
     occupied = occupancy.get("class") == "OCCUPIED"
     snapshot_quality = dict(quality_summary)
     snapshot_quality["fps"] = udp_summary.get("fps", snapshot_quality.get("fps", 0.0))
-    telemetry = _normalize_live_telemetry(telemetry, occupancy, fingerprint, trusted, occupied)
+    telemetry = _normalize_live_telemetry(
+        telemetry, occupancy, fingerprint, trusted, occupied
+    )
     snapshot = {
         "scenario": "live_probe",
         "source": "actual_udp_probe",
@@ -191,9 +300,13 @@ def _build_live_snapshot(
         "motion_cadence": motion_cadence,
     }
     snapshot["room_state"] = LIVE_ROOM_TRACKER.observe(snapshot)
-    material_change = LIVE_MATERIAL_TRACKER.observe(fingerprint_to_amplitudes(fingerprint))
+    material_change = LIVE_MATERIAL_TRACKER.observe(
+        fingerprint_to_amplitudes(fingerprint)
+    )
     material_change["trusted"] = snapshot_quality.get("status") == "GOOD"
-    material_change["trust_reason"] = "quality_good" if material_change["trusted"] else "signal_quality_not_good"
+    material_change["trust_reason"] = (
+        "quality_good" if material_change["trusted"] else "signal_quality_not_good"
+    )
     snapshot["material_change"] = material_change
     snapshot["person_count"] = estimate_person_count(snapshot)
     return snapshot
@@ -210,10 +323,16 @@ def _normalize_live_telemetry(
     normalized["presence"] = bool(normalized.get("presence", occupied))
     normalized["resp_bpm"] = round(float(normalized.get("resp_bpm", 0.0) or 0.0), 1)
     normalized["heart_bpm"] = round(float(normalized.get("heart_bpm", 0.0) or 0.0), 1)
-    normalized["fall_detected"] = bool(normalized.get("fall_detected", normalized.get("fall_alert", False)))
-    normalized["variance"] = round(float(normalized.get("variance", fingerprint.get("spread", 0.0)) or 0.0), 2)
+    normalized["fall_detected"] = bool(
+        normalized.get("fall_detected", normalized.get("fall_alert", False))
+    )
+    normalized["variance"] = round(
+        float(normalized.get("variance", fingerprint.get("spread", 0.0)) or 0.0), 2
+    )
     normalized["rep_count"] = int(normalized.get("rep_count", 0) or 0)
-    normalized["acceleration"] = round(float(normalized.get("acceleration", 0.0) or 0.0), 2)
+    normalized["acceleration"] = round(
+        float(normalized.get("acceleration", 0.0) or 0.0), 2
+    )
     normalized["motion"] = dict(
         normalized.get("motion")
         or {
@@ -230,9 +349,13 @@ def _with_room_state(snapshot: dict) -> dict:
     snapshot["room_state"] = build_room_state(snapshot)
     snapshot["spectrogram"] = build_demo_spectrogram(snapshot)
     snapshot["material_change"] = build_demo_material_change(snapshot)
-    snapshot["material_change"]["trusted"] = snapshot.get("quality", {}).get("status") == "GOOD"
+    snapshot["material_change"]["trusted"] = (
+        snapshot.get("quality", {}).get("status") == "GOOD"
+    )
     snapshot["material_change"]["trust_reason"] = (
-        "quality_good" if snapshot["material_change"]["trusted"] else "signal_quality_not_good"
+        "quality_good"
+        if snapshot["material_change"]["trusted"]
+        else "signal_quality_not_good"
     )
     snapshot["motion_cadence"] = build_demo_motion_cadence(snapshot)
     snapshot["person_count"] = estimate_person_count(snapshot)
