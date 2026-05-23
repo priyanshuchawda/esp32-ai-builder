@@ -165,6 +165,39 @@
   line-height: 1.35;
 }
 
+.room-state-strip {
+  display: grid;
+  grid-template-columns: 1fr 0.75fr auto;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.room-state-strip span,
+.room-state-strip code {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.room-state-strip strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.room-state-strip code {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  letter-spacing: 0;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -479,6 +512,7 @@
   .dashboard-grid,
   .pipeline,
   .capability-grid,
+  .room-state-strip,
   .metric-grid {
     grid-template-columns: 1fr;
   }

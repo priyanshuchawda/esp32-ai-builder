@@ -57,12 +57,23 @@ type Fingerprint = {
   bars: string
 }
 
+type RoomState = {
+  cluster_id: number
+  label: string
+  distance: number
+  transitioned: boolean
+  trusted: boolean
+  anomaly_score: number
+  timeline: string
+}
+
 type ScenarioSnapshot = {
   scenario: string
   telemetry: Telemetry
   quality: Quality
   summary: Summary
   fingerprint: Fingerprint
+  room_state?: RoomState
   source?: string
   note?: string
 }
@@ -309,6 +320,8 @@ function App() {
 
   const selected = payload.selected
   const live = liveProbe?.snapshot ?? payload.live
+  const roomState = selected.room_state
+  const liveRoomState = live.room_state
   const selectedValues = useMemo(
     () => fingerprintValues(selected.fingerprint.bars),
     [selected.fingerprint.bars],
@@ -368,6 +381,19 @@ function App() {
             </span>
           </div>
           <p className="headline">{selected.summary.headline}</p>
+          {roomState ? (
+            <div className="room-state-strip">
+              <span>
+                <strong>{roomState.label}</strong>
+                cluster {roomState.cluster_id}
+              </span>
+              <span>
+                <strong>{formatNumber(roomState.anomaly_score, 2)}</strong>
+                anomaly
+              </span>
+              <code>{roomState.timeline || String(roomState.cluster_id)}</code>
+            </div>
+          ) : null}
           <div className="metric-grid">
             <Metric icon={<UserRound size={18} />} label="Occupancy" value={selected.telemetry.occupancy.class} />
             <Metric icon={<Activity size={18} />} label="Motion" value={selected.telemetry.motion.display_level} />
@@ -431,7 +457,11 @@ function App() {
             <Metric icon={<Gauge size={18} />} label="FPS" value={formatNumber(live.quality.fps)} />
             <Metric icon={<ShieldCheck size={18} />} label="Trust" value={live.telemetry.occupancy.trusted ? 'trusted' : 'blocked'} />
             <Metric icon={<Zap size={18} />} label="Packets" value={liveProbe ? String(liveProbe.udp.packets) : '--'} />
-            <Metric icon={<AlertTriangle size={18} />} label="Source" value={(live.source ?? 'live').replaceAll('_', ' ')} />
+            <Metric
+              icon={<AlertTriangle size={18} />}
+              label="Room state"
+              value={liveRoomState?.label ?? (live.source ?? 'live').replaceAll('_', ' ')}
+            />
           </div>
           <p className={`muted ${liveProbeStatus === 'error' ? 'error' : ''}`}>
             {liveProbeStatus === 'error'
