@@ -9,6 +9,11 @@
 #define TARGET_IP "192.168.1.100"
 #define TARGET_PORT 5005
 
+// Optional: lock the ESP32 to a specific 2.4 GHz AP if your router has
+// multiple APs with the same SSID.
+// #define WIFI_CHANNEL 1
+// #define WIFI_BSSID {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}
+
 // Unique identifier for this CSI node (1-255)
 #define NODE_ID 1
 
