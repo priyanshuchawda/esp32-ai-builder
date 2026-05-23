@@ -59,6 +59,8 @@ class TestSignalQualityMonitor(unittest.TestCase):
         self.assertIn("sequence_gaps", summary["reasons"])
         self.assertIn("rssi_unstable", summary["reasons"])
         self.assertIn("mixed_subcarriers", summary["reasons"])
+        self.assertGreater(summary["rssi_spread"], 30)
+        self.assertGreater(summary["rssi_robust_spread"], 30)
 
     def test_rare_subcarrier_mode_changes_do_not_mark_stream_mixed(self):
         monitor = SignalQualityMonitor(window_seconds=10.0)
@@ -73,6 +75,32 @@ class TestSignalQualityMonitor(unittest.TestCase):
         self.assertNotIn("mixed_subcarriers", summary["reasons"])
         self.assertEqual(summary["dominant_subcarriers"], 192)
         self.assertAlmostEqual(summary["dominant_subcarrier_ratio"], 0.95)
+
+    def test_rare_rssi_outliers_do_not_mark_stream_unstable(self):
+        monitor = SignalQualityMonitor(window_seconds=10.0)
+
+        rssis = [-50] * 96 + [-85, -84, -20, -21]
+        for i, rssi in enumerate(rssis):
+            monitor.record_packet(seq=i, rssi=rssi, n_subcarriers=128, timestamp=100.0 + (i * 0.05))
+
+        summary = monitor.summary(now=105.0)
+
+        self.assertGreater(summary["rssi_spread"], 30)
+        self.assertLess(summary["rssi_robust_spread"], 10)
+        self.assertIn("rssi_outliers", summary["reasons"])
+        self.assertNotIn("rssi_unstable", summary["reasons"])
+
+    def test_sustained_rssi_variation_marks_stream_unstable(self):
+        monitor = SignalQualityMonitor(window_seconds=10.0)
+
+        for i in range(100):
+            rssi = -80 if i % 2 == 0 else -40
+            monitor.record_packet(seq=i, rssi=rssi, n_subcarriers=128, timestamp=100.0 + (i * 0.05))
+
+        summary = monitor.summary(now=105.0)
+
+        self.assertGreater(summary["rssi_robust_spread"], 30)
+        self.assertIn("rssi_unstable", summary["reasons"])
 
 
 if __name__ == "__main__":
