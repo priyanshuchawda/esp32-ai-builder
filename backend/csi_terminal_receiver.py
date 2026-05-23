@@ -20,6 +20,11 @@ from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
 
+try:
+    from backend.csi_calibration import PresenceCalibration
+except ImportError:
+    from csi_calibration import PresenceCalibration
+
 # Try importing scipy for butterworth bandpass filters
 try:
     from scipy.signal import butter, lfilter
@@ -44,6 +49,7 @@ class RuViewDSP:
         # Calibration / variance thresholds
         self.presence_threshold = 0.6
         self.fall_threshold = 12.0
+        self.presence_calibration = PresenceCalibration(active=False)
         
         # Debouncing/cooldowns
         self.last_fall_time = 0.0
@@ -57,9 +63,23 @@ class RuViewDSP:
         
         # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
         self._filter_cache = {}
+
+    def start_presence_calibration(self, target_samples=60):
+        self.presence_calibration = PresenceCalibration(
+            min_samples=target_samples,
+            min_threshold=self.presence_threshold,
+            active=True,
+        )
+        return self.presence_calibration.summary()
+
+    def reset_presence_calibration(self):
+        self.presence_calibration = PresenceCalibration(active=False)
+        return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
         self.raw_history.append(raw_val)
+        if self.presence_calibration.active:
+            self.presence_calibration.add_sample(raw_val)
         
         # 1. Apply EMA Lowpass Denoising (Alpha = 0.2)
         alpha = 0.2
@@ -117,6 +137,9 @@ class RuViewDSP:
         return EMA_fast - EMA_slow
 
     def process_telemetry(self):
+        calibration_summary = self.presence_calibration.summary()
+        effective_presence_threshold = self.presence_calibration.effective_threshold(self.presence_threshold)
+
         if len(self.filtered_history) < 30:
             return {
                 "presence": False,
@@ -125,7 +148,9 @@ class RuViewDSP:
                 "variance": 0.0,
                 "fall_alert": False,
                 "acceleration": 0.0,
-                "rep_count": 0
+                "rep_count": 0,
+                "effective_presence_threshold": effective_presence_threshold,
+                "calibration": calibration_summary,
             }
             
         raw_arr = np.array(self.raw_history)
@@ -137,7 +162,7 @@ class RuViewDSP:
         variance = np.var(recent_raw)
         std_dev = np.std(recent_raw)
         
-        presence = (variance > self.presence_threshold) or (std_dev > (self.presence_threshold * 0.8))
+        presence = (variance > effective_presence_threshold) or (std_dev > (effective_presence_threshold * 0.8))
         
         # Track presence for auto-reset of rep count
         now = time.time()
@@ -197,7 +222,9 @@ class RuViewDSP:
             "variance": variance,
             "fall_alert": fall_alert,
             "acceleration": acceleration,
-            "rep_count": self.rep_count
+            "rep_count": self.rep_count,
+            "effective_presence_threshold": effective_presence_threshold,
+            "calibration": self.presence_calibration.summary(),
         }
         
     def _compute_bpm_zero_crossing(self, signal):
@@ -250,6 +277,8 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Breathing Rate:", f"[bold yellow]{telemetry['resp_bpm']} BPM[/bold yellow]" if telemetry['resp_bpm'] > 0 else "Calculating...")
     table.add_row("Est. Heart Rate:", f"[bold magenta]{int(telemetry['heart_bpm'])} BPM[/bold magenta]" if telemetry['heart_bpm'] > 0 else "Calculating...")
     table.add_row("Signal Variance:", f"{telemetry['variance']:.4f}")
+    table.add_row("Presence Threshold:", f"{telemetry.get('effective_presence_threshold', 0.0):.4f}")
+    table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
     table.add_row("Max Acceleration:", f"{telemetry['acceleration']:.2f}")
     table.add_row("Exercise Reps:", f"[bold cyan]{telemetry['rep_count']}[/bold cyan]")
     
