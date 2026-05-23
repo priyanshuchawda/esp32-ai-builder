@@ -36,9 +36,11 @@ def build_probe_lines(
     udp_summary: dict,
     quality_summary: dict,
     modes: dict[int, int],
+    fingerprint: dict | None = None,
     occupancy: dict,
     serial_result: SerialProbeResult | None = None,
 ) -> list[str]:
+    from backend.csi_fingerprint import format_fingerprint_lines
     from backend.csi_power_summary import build_power_summary, format_power_summary_lines
 
     status = _overall_status(udp_summary, quality_summary, serial_result, config_summary)
@@ -100,12 +102,15 @@ def build_probe_lines(
         else {},
     }
     lines.extend(format_power_summary_lines(build_power_summary(summary_telemetry, quality_summary), prefix="POWER_SUMMARY"))
+    if fingerprint is not None:
+        lines.extend(format_fingerprint_lines(fingerprint, prefix="CSI_FINGERPRINT"))
     for action in recommend_next_actions(config_summary, udp_summary, quality_summary, serial_result):
         lines.append(f"NEXT_ACTION {action}")
     return lines
 
 
-def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float) -> tuple[dict, dict, dict[int, int], dict]:
+def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float) -> tuple[dict, dict, dict[int, int], dict, dict]:
+    from backend.csi_fingerprint import build_fingerprint
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_subcarriers import SubcarrierSelector
     from backend.csi_terminal_receiver import RuViewDSP, load_evaluator_report, parse_adr018_packet, with_presence_confidence
@@ -121,6 +126,7 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     selector = SubcarrierSelector()
     packet_count = 0
     modes: dict[int, int] = {}
+    latest_amplitudes = []
     started = time.time()
     end_at = started + duration_sec
 
@@ -134,6 +140,7 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
             if not packet:
                 continue
             packet_count += 1
+            latest_amplitudes = packet["amplitudes"]
             modes[packet["n_subcarriers"]] = modes.get(packet["n_subcarriers"], 0) + 1
             quality.record_packet(
                 seq=packet["seq"],
@@ -151,7 +158,8 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     quality_summary = quality.summary(now=time.time())
     telemetry = with_presence_confidence(dsp.process_telemetry(), quality_summary)
     occupancy = classify_occupancy(telemetry, quality_summary, load_evaluator_report())
-    return udp_summary, quality_summary, modes, occupancy
+    fingerprint = build_fingerprint(latest_amplitudes, bins=16)
+    return udp_summary, quality_summary, modes, occupancy, fingerprint
 
 
 def load_firmware_network_config(path: Path | None = None, text: str | None = None) -> dict:
@@ -285,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.serial_port:
         serial_result = probe_serial(args.serial_port, args.serial_baud, args.serial_seconds)
 
-    udp_summary, quality_summary, modes, occupancy = run_udp_probe(
+    udp_summary, quality_summary, modes, occupancy, fingerprint = run_udp_probe(
         bind_ip=args.bind_ip,
         udp_port=args.udp_port,
         duration_sec=args.duration,
@@ -304,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         udp_summary=udp_summary,
         quality_summary=quality_summary,
         modes=modes,
+        fingerprint=fingerprint,
         occupancy=occupancy,
         serial_result=serial_result,
     )

@@ -40,6 +40,7 @@ class TestEspLiveProbe(unittest.TestCase):
             udp_summary={"status": "FAIL", "reason": "no_packets", "packets": 0, "fps": 0.0},
             quality_summary={"status": "BAD", "reasons": ["no_packets"]},
             modes={},
+            fingerprint={"bins": 0, "mean": 0.0, "spread": 0.0, "bars": ""},
             occupancy={"class": "UNKNOWN", "trusted": False, "reasons": ["signal_quality_bad"]},
             serial_result=SerialProbeResult(
                 status="FAIL",
@@ -56,6 +57,7 @@ class TestEspLiveProbe(unittest.TestCase):
         self.assertIn("QUALITY_STATUS BAD reasons=no_packets", lines)
         self.assertIn("OCCUPANCY UNKNOWN trusted=False reasons=signal_quality_bad", lines)
         self.assertIn("POWER_SUMMARY state=SIGNAL_WATCH confidence=LOW", lines)
+        self.assertIn("CSI_FINGERPRINT bars=none", lines)
         self.assertFalse(any("local device path" in line for line in lines))
 
     def test_load_firmware_network_config_ignores_secret_values(self):
