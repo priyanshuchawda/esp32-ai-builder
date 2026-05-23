@@ -60,6 +60,20 @@ class TestSignalQualityMonitor(unittest.TestCase):
         self.assertIn("rssi_unstable", summary["reasons"])
         self.assertIn("mixed_subcarriers", summary["reasons"])
 
+    def test_rare_subcarrier_mode_changes_do_not_mark_stream_mixed(self):
+        monitor = SignalQualityMonitor(window_seconds=10.0)
+
+        for i in range(95):
+            monitor.record_packet(seq=i, rssi=-50, n_subcarriers=192, timestamp=100.0 + (i * 0.05))
+        for i in range(95, 100):
+            monitor.record_packet(seq=i, rssi=-50, n_subcarriers=128, timestamp=100.0 + (i * 0.05))
+
+        summary = monitor.summary(now=105.0)
+
+        self.assertNotIn("mixed_subcarriers", summary["reasons"])
+        self.assertEqual(summary["dominant_subcarriers"], 192)
+        self.assertAlmostEqual(summary["dominant_subcarrier_ratio"], 0.95)
+
 
 if __name__ == "__main__":
     unittest.main()

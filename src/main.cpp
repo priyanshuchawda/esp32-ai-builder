@@ -182,7 +182,9 @@ bool startRealCsiCapture() {
   wifi_csi_config_t csiConfig = {};
   csiConfig.lltf_en = true;
   csiConfig.htltf_en = true;
-  csiConfig.stbc_htltf2_en = true;
+  // Keep STBC HT-LTF disabled on ESP32 DevKit V1 to reduce CSI frame-length
+  // switching between 64/128/192 bins on ordinary router traffic.
+  csiConfig.stbc_htltf2_en = false;
   csiConfig.ltf_merge_en = true;
   csiConfig.channel_filter_en = false;
   csiConfig.manu_scale = false;
@@ -201,7 +203,8 @@ bool startRealCsiCapture() {
     return false;
   }
   
-  // Set promiscuous filter to only receive MGMT frames (beacon/probes) to avoid core panics
+  // Keep the stream on management frames only. Data frames increased frame
+  // length switching and RSSI spread during live DevKit V1 tests.
   wifi_promiscuous_filter_t filt = {
       .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
   };
