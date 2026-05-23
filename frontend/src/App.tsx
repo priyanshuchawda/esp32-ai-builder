@@ -17,6 +17,7 @@ import {
   Zap,
 } from 'lucide-react'
 import './App.css'
+import { ObservatoryScene, type ObservatoryPayload } from './ObservatoryScene'
 
 type Quality = {
   status: string
@@ -155,6 +156,9 @@ type LiveProbePayload = {
   snapshot: ScenarioSnapshot
   next_actions: string[]
 }
+
+type AppView = 'dashboard' | 'observatory'
+type ObservatoryMode = 'demo' | 'live'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
 
@@ -383,13 +387,60 @@ function buildWavePath(values: number[]) {
     .join(' ')
 }
 
+function buildFallbackObservatory(snapshot: ScenarioSnapshot, source: string): ObservatoryPayload {
+  const qualityGood = snapshot.quality.status === 'GOOD'
+  const occupied = snapshot.telemetry.occupancy.class === 'OCCUPIED'
+  const blocked = !qualityGood || !snapshot.telemetry.occupancy.trusted
+  const poseState = !qualityGood ? 'unknown' : !occupied ? 'none' : snapshot.telemetry.fall_detected ? 'fallen' : 'sitting'
+
+  return {
+    source,
+    truth_label: 'visualization_only_not_densepose',
+    visual: {
+      pose_state: poseState,
+      avatar: poseState === 'none' ? 'none' : blocked ? 'transparent' : poseState,
+      trust: blocked ? 'weak' : 'trusted',
+      opacity: blocked ? 0.28 : poseState === 'none' ? 0 : 0.86,
+      claim: 'CSI-inferred activity visualization',
+      reasons: blocked ? ['signal_quality_not_good'] : ['local_dashboard_fallback'],
+    },
+    persons: snapshot.person_count ?? {
+      range: 'unknown',
+      label: 'count unavailable',
+      trusted: false,
+    },
+    signal: {
+      quality: snapshot.quality.status,
+      fps: snapshot.quality.fps,
+      packets: 0,
+      reasons: snapshot.quality.reasons,
+    },
+    vitals: {
+      resp_bpm: snapshot.telemetry.resp_bpm,
+      heart_bpm: snapshot.telemetry.heart_bpm,
+      available: Boolean(snapshot.telemetry.resp_bpm || snapshot.telemetry.heart_bpm),
+    },
+    motion: {
+      display_level: snapshot.telemetry.motion.display_level,
+      state: snapshot.motion_cadence?.state ?? 'unknown',
+      cadence_spm: snapshot.motion_cadence?.cadence_spm ?? 0,
+      trusted: Boolean(snapshot.motion_cadence?.trusted),
+    },
+  }
+}
+
 function App() {
   const [payload, setPayload] = useState<DemoPayload>(fallbackPayload)
   const [selectedScenario, setSelectedScenario] = useState('occupied_still')
+  const [activeView, setActiveView] = useState<AppView>('dashboard')
   const [apiStatus, setApiStatus] = useState<'connecting' | 'online' | 'fallback'>('connecting')
   const [liveProbe, setLiveProbe] = useState<LiveProbePayload | null>(null)
   const [liveProbeStatus, setLiveProbeStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [liveProbeError, setLiveProbeError] = useState('')
+  const [observatoryMode, setObservatoryMode] = useState<ObservatoryMode>('demo')
+  const [observatoryPayload, setObservatoryPayload] = useState<ObservatoryPayload | null>(null)
+  const [observatoryStatus, setObservatoryStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [observatoryError, setObservatoryError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -418,6 +469,38 @@ function App() {
     return () => controller.abort()
   }, [selectedScenario])
 
+  useEffect(() => {
+    if (activeView !== 'observatory' || observatoryMode !== 'demo') {
+      return
+    }
+
+    const controller = new AbortController()
+
+    fetch(`${API_BASE}/api/observatory-live?mode=demo&scenario=${selectedScenario}`, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Observatory returned ${response.status}`)
+        }
+        return response.json() as Promise<ObservatoryPayload>
+      })
+      .then((data) => {
+        setObservatoryPayload(data)
+        setObservatoryStatus('done')
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setObservatoryPayload(buildFallbackObservatory(payload.selected, 'local_fallback'))
+        setObservatoryError(error instanceof Error ? error.message : 'Observatory demo failed')
+        setObservatoryStatus('error')
+      })
+
+    return () => controller.abort()
+  }, [activeView, observatoryMode, payload.selected, selectedScenario])
+
   function runLiveProbe() {
     setLiveProbeStatus('running')
     setLiveProbeError('')
@@ -438,6 +521,29 @@ function App() {
       })
   }
 
+  function runObservatoryLiveProbe() {
+    setActiveView('observatory')
+    setObservatoryMode('live')
+    setObservatoryStatus('running')
+    setObservatoryError('')
+    fetch(`${API_BASE}/api/observatory-live?mode=live&duration=5&udp_port=5005`)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Observatory live returned ${response.status}`)
+        }
+        return response.json() as Promise<ObservatoryPayload>
+      })
+      .then((data) => {
+        setObservatoryPayload(data)
+        setObservatoryStatus('done')
+      })
+      .catch((error: unknown) => {
+        setObservatoryPayload(buildFallbackObservatory(liveProbe?.snapshot ?? payload.live, 'local_fallback'))
+        setObservatoryError(error instanceof Error ? error.message : 'Observatory live failed')
+        setObservatoryStatus('error')
+      })
+  }
+
   const selected = payload.selected
   const live = liveProbe?.snapshot ?? payload.live
   const roomState = selected.room_state
@@ -454,6 +560,7 @@ function App() {
   )
   const liveValues = useMemo(() => fingerprintValues(live.fingerprint.bars), [live.fingerprint.bars])
   const wavePath = buildWavePath(selectedValues)
+  const observatory = observatoryPayload ?? buildFallbackObservatory(selected, 'local_fallback')
 
   return (
     <main className="shell">
@@ -478,6 +585,46 @@ function App() {
         </div>
       </header>
 
+      <nav className="view-switcher" aria-label="dashboard views">
+        <button
+          className={activeView === 'dashboard' ? 'active' : ''}
+          onClick={() => setActiveView('dashboard')}
+          type="button"
+        >
+          <BarChart3 size={17} />
+          Dashboard
+        </button>
+        <button
+          className={activeView === 'observatory' ? 'active' : ''}
+          onClick={() => {
+            setActiveView('observatory')
+            setObservatoryMode('demo')
+            setObservatoryStatus('running')
+            setObservatoryError('')
+          }}
+          type="button"
+        >
+          <Radio size={17} />
+          Observatory
+        </button>
+      </nav>
+
+      {activeView === 'observatory' ? (
+        <ObservatoryExperience
+          error={observatoryError}
+          mode={observatoryMode}
+          onDemo={() => {
+            setObservatoryMode('demo')
+            setObservatoryPayload(null)
+            setObservatoryStatus('running')
+            setObservatoryError('')
+          }}
+          onLive={runObservatoryLiveProbe}
+          payload={observatory}
+          status={observatoryStatus}
+        />
+      ) : (
+        <>
       <section className="scenario-rail" aria-label="scenario controls">
         {payload.scenarios.map((scenario) => (
           <button
@@ -653,7 +800,91 @@ function App() {
           </div>
         </article>
       </section>
+        </>
+      )}
     </main>
+  )
+}
+
+function ObservatoryExperience({
+  error,
+  mode,
+  onDemo,
+  onLive,
+  payload,
+  status,
+}: {
+  error: string
+  mode: ObservatoryMode
+  onDemo: () => void
+  onLive: () => void
+  payload: ObservatoryPayload
+  status: 'idle' | 'running' | 'done' | 'error'
+}) {
+  const reasons = payload.visual.reasons.length > 0 ? payload.visual.reasons : payload.signal.reasons
+  const statusText = status === 'running' ? 'refreshing' : status === 'error' ? error : payload.visual.claim
+
+  return (
+    <section className="observatory-layout" aria-label="CSI observatory mode">
+      <div className="observatory-stage">
+        <ObservatoryScene payload={payload} />
+        <div className="observatory-brand">
+          <strong>ESP32 Observatory</strong>
+          <span>{payload.truth_label.replaceAll('_', ' ')}</span>
+        </div>
+        <div className="observatory-mode">
+          <button className={mode === 'demo' ? 'active' : ''} onClick={onDemo} type="button">
+            Demo
+          </button>
+          <button className={mode === 'live' ? 'active' : ''} disabled={status === 'running'} onClick={onLive} type="button">
+            {status === 'running' ? 'Live...' : 'Live ESP'}
+          </button>
+        </div>
+        <div className="observatory-caption">
+          <strong>{payload.visual.pose_state.replaceAll('_', ' ')}</strong>
+          <span>{statusText}</span>
+        </div>
+      </div>
+
+      <aside className="observatory-hud" aria-label="observatory signal summary">
+        <div className="hud-block">
+          <p className="eyebrow">Wi-Fi signal</p>
+          <div className="hud-grid">
+            <Metric icon={<Wifi size={18} />} label="Quality" value={payload.signal.quality} />
+            <Metric icon={<Gauge size={18} />} label="FPS" value={formatNumber(payload.signal.fps)} />
+            <Metric icon={<Zap size={18} />} label="Packets" value={String(payload.signal.packets)} />
+            <Metric icon={<ShieldCheck size={18} />} label="Trust" value={payload.visual.trust} />
+          </div>
+        </div>
+
+        <div className="hud-block">
+          <p className="eyebrow">Presence</p>
+          <div className={`presence-banner ${payload.persons.trusted ? 'trusted' : ''}`}>
+            <strong>{payload.persons.range}</strong>
+            <span>{payload.persons.label}</span>
+          </div>
+        </div>
+
+        <div className="hud-block">
+          <p className="eyebrow">Vitals</p>
+          <div className="hud-grid">
+            <Metric icon={<HeartPulse size={18} />} label="Heart" value={`${formatNumber(payload.vitals.heart_bpm)} bpm`} />
+            <Metric icon={<Waves size={18} />} label="Breath" value={`${formatNumber(payload.vitals.resp_bpm)} bpm`} />
+            <Metric icon={<Activity size={18} />} label="Motion" value={payload.motion.display_level} />
+            <Metric icon={<Signal size={18} />} label="Cadence" value={`${formatNumber(payload.motion.cadence_spm, 0)} spm`} />
+          </div>
+        </div>
+
+        <div className="hud-block">
+          <p className="eyebrow">Gate reasons</p>
+          <div className="reason-list">
+            {reasons.map((reason) => (
+              <span key={reason}>{reason.replaceAll('_', ' ')}</span>
+            ))}
+          </div>
+        </div>
+      </aside>
+    </section>
   )
 }
 

@@ -78,6 +78,214 @@
   color: var(--text-strong);
 }
 
+.view-switcher {
+  display: inline-flex;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.view-switcher button,
+.observatory-mode button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.view-switcher button.active,
+.observatory-mode button.active {
+  border-color: rgba(56, 189, 248, 0.48);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--text-strong);
+}
+
+.observatory-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  min-height: 680px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #050807;
+  box-shadow: var(--shadow);
+}
+
+.observatory-stage {
+  position: relative;
+  min-height: 680px;
+}
+
+.observatory-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.observatory-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.observatory-brand,
+.observatory-mode,
+.observatory-caption {
+  position: absolute;
+  z-index: 2;
+}
+
+.observatory-brand {
+  top: 24px;
+  left: 24px;
+}
+
+.observatory-brand strong,
+.observatory-brand span {
+  display: block;
+}
+
+.observatory-brand strong {
+  color: var(--text-strong);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.observatory-brand span {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.observatory-mode {
+  top: 24px;
+  right: 24px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid rgba(206, 214, 196, 0.16);
+  border-radius: 8px;
+  background: rgba(5, 8, 7, 0.72);
+}
+
+.observatory-mode button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.observatory-caption {
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(45, 212, 191, 0.26);
+  border-radius: 8px;
+  background: rgba(5, 8, 7, 0.68);
+}
+
+.observatory-caption strong {
+  color: var(--ok);
+  font-size: 18px;
+  text-transform: uppercase;
+}
+
+.observatory-caption span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.observatory-hud {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
+  border-left: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(56, 189, 248, 0.08), transparent 42%),
+    rgba(15, 23, 42, 0.72);
+}
+
+.hud-block {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.hud-block:last-child {
+  border-bottom: 0;
+}
+
+.hud-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.presence-banner {
+  display: grid;
+  gap: 4px;
+  min-height: 84px;
+  padding: 16px;
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.presence-banner.trusted {
+  border-color: rgba(74, 222, 128, 0.36);
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.presence-banner strong {
+  color: var(--ok);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.presence-banner span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reason-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .scenario-rail {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -651,6 +859,7 @@
 
   .scenario-rail,
   .dashboard-grid,
+  .observatory-layout,
   .pipeline,
   .capability-grid,
   .room-state-strip,
@@ -659,6 +868,45 @@
   .count-strip,
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .observatory-layout,
+  .observatory-stage {
+    min-height: 620px;
+  }
+
+  .observatory-hud {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .observatory-brand,
+  .observatory-mode,
+  .observatory-caption {
+    left: 14px;
+    right: 14px;
+  }
+
+  .observatory-brand {
+    top: 16px;
+  }
+
+  .observatory-mode {
+    top: 82px;
+    justify-content: stretch;
+  }
+
+  .observatory-mode button {
+    flex: 1;
+  }
+
+  .observatory-caption {
+    display: grid;
+    bottom: 14px;
+  }
+
+  .observatory-caption span {
+    text-align: left;
   }
 
   .panel,
