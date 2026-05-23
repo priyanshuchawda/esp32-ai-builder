@@ -14,6 +14,7 @@ def test_judge_demo_payload_contains_scenarios_and_live_snapshot():
     assert len(data["scenarios"]) >= 5
     assert data["live"]["summary"]["demo_state"]
     assert data["live"]["room_state"]["label"]
+    assert data["selected"]["spectrogram"]["rows"]
     assert data["scenarios"][0]["fingerprint"]["bars"].isascii()
     assert data["scenarios"][0]["room_state"]["cluster_id"] >= 0
     assert data["pipeline"][0]["label"] == "ESP32 DevKit V1"
