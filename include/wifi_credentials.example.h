@@ -14,6 +14,10 @@
 // #define WIFI_CHANNEL 1
 // #define WIFI_BSSID {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}
 
+// Optional live-demo mode: more CSI packets, but potentially noisier frame
+// lengths/RSSI. Leave unset for the conservative management-frame default.
+// #define CSI_PROMISCUOUS_FILTER_MASK (WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA)
+
 // Unique identifier for this CSI node (1-255)
 #define NODE_ID 1
 
