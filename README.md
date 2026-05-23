@@ -54,6 +54,17 @@ uv run --with-requirements python-engine/requirements.txt python python-engine/a
 
 ## Test
 
+Active backend tests should be run from the repository root. The root
+`pytest.ini` intentionally scopes collection to `backend/` so archived RuView
+and legacy experiment trees are not collected by accident.
+
+```powershell
+uv run --project backend pytest -q
+```
+
+Legacy Gemma-filter tests can still be run directly when working in that
+subproject:
+
 ```powershell
 cd esp32-csi-gemma-filter
 uv run --with-requirements python-engine/requirements.txt pytest tests
