@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 
 from backend.csi_calibration import PresenceCalibration
 from backend.csi_confidence import evaluate_presence_confidence
+from backend.csi_fingerprint import build_fingerprint
 from backend.csi_filters import StreamingHampelFilter
 from backend.csi_motion import MotionLevelEstimator, gate_motion_for_quality
 from backend.csi_quality import SignalQualityMonitor
@@ -466,7 +467,7 @@ class RuViewDSP:
             filtered = clean_val
         self.filtered_history.append(filtered)
         
-        filter_window = list(self.filtered_history)[-120:]
+        filter_window = list(self.filtered_history)[-80:]
 
         # 2. Extract Respiration Band (0.1 - 0.5 Hz)
         resp_val = self._bandpass_filter(filter_window, 0.1, 0.5)
@@ -772,6 +773,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                         "freq_mhz": packet["freq_mhz"],
                         "fps": fps,
                         "signal_quality": signal_quality,
+                        "csi_fingerprint": build_fingerprint(packet["amplitudes"], bins=16),
                         "selected_subcarriers": subcarrier_selection["selected_indices"],
                         "selected_signal": selected_signal
                     },
@@ -903,6 +905,7 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                         "freq_mhz": 2437,
                         "fps": fps,
                         "signal_quality": signal_quality,
+                        "csi_fingerprint": build_fingerprint(bins, bins=6),
                         "selected_subcarriers": subcarrier_selection["selected_indices"],
                         "selected_signal": selected_signal
                     },
@@ -1077,6 +1080,7 @@ def simulator_loop(shutdown_event, data_queue, config):
                 "freq_mhz": packet["freq_mhz"],
                 "fps": fps,
                 "signal_quality": signal_quality,
+                "csi_fingerprint": build_fingerprint(amplitudes, bins=16),
                 "selected_subcarriers": subcarrier_selection["selected_indices"],
                 "selected_signal": selected_signal
             },
@@ -1810,6 +1814,9 @@ def draw_power_summary(stats, telemetry, container):
     summary = build_power_summary(telemetry, stats.get("signal_quality", {}))
     capabilities = ", ".join(summary.get("capabilities", [])) or "none"
     next_actions = ", ".join(summary.get("next_actions", [])) or "none"
+    fingerprint = stats.get("csi_fingerprint", {}) or {}
+    fingerprint_bars = html_lib.escape(str(fingerprint.get("bars", "none") or "none"))
+    fingerprint_meta = f"mean {fingerprint.get('mean', 0.0)} / spread {fingerprint.get('spread', 0.0)}"
     confidence_color = {
         "HIGH": "#33ff33",
         "MEDIUM": "#ffeb3b",
@@ -1831,6 +1838,9 @@ def draw_power_summary(stats, telemetry, container):
         </div>
         <div style='margin-top: 10px; color: #8892b0; font-family: monospace; font-size: 0.76rem;'>Capabilities</div>
         <div style='color: #33ff33; font-family: monospace; font-size: 0.78rem; word-break: break-word;'>{html_lib.escape(capabilities)}</div>
+        <div style='margin-top: 10px; color: #8892b0; font-family: monospace; font-size: 0.76rem;'>CSI Fingerprint</div>
+        <div style='color: #00ffff; font-family: monospace; font-size: 0.95rem; letter-spacing: 1px; word-break: break-word;'>{fingerprint_bars}</div>
+        <div style='color: #8892b0; font-family: monospace; font-size: 0.68rem;'>{html_lib.escape(fingerprint_meta)}</div>
         <div style='margin-top: 10px; color: #8892b0; font-family: monospace; font-size: 0.76rem;'>Next Action</div>
         <div style='color: #ffeb3b; font-family: monospace; font-size: 0.76rem; word-break: break-word;'>{html_lib.escape(next_actions)}</div>
     </div>

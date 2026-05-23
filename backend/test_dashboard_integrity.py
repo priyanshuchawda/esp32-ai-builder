@@ -51,6 +51,21 @@ class TestDashboardIntegrity(unittest.TestCase):
         self.assertIn("Human presence visible through Wi-Fi CSI", html)
         self.assertIn("presence, breathing, heart_rate", html)
 
+    def test_draw_power_summary_includes_csi_fingerprint(self):
+        container = MockStreamlitContainer()
+        telemetry = {"occupancy": {"class": "EMPTY", "trusted": True}, "motion": {"display_level": "STILL"}}
+        stats = {
+            "signal_quality": {"status": "GOOD", "fps": 25.0, "reasons": []},
+            "csi_fingerprint": {"bins": 4, "mean": 16.5, "spread": 9.0, "bars": "._+#"},
+        }
+
+        draw_power_summary(stats, telemetry, container)
+
+        html = container.markdown_calls[0][0]
+        self.assertIn("CSI Fingerprint", html)
+        self.assertIn("._+#", html)
+        self.assertIn("mean 16.5", html)
+
     def test_draw_vital_signs_absent(self):
         container = MockStreamlitContainer()
         telemetry = {
