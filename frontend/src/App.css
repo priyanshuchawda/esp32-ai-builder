@@ -212,14 +212,27 @@
   margin: 8px 0 4px;
 }
 
+.count-strip {
+  display: grid;
+  grid-template-columns: 0.55fr 1fr auto;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
 .cadence-strip.compact {
+  margin: 0 0 14px;
+}
+
+.count-strip.compact {
   margin: 0 0 14px;
 }
 
 .material-strip span,
 .material-strip code,
 .cadence-strip span,
-.cadence-strip code {
+.cadence-strip code,
+.count-strip span,
+.count-strip code {
   min-height: 44px;
   padding: 8px 10px;
   border: 1px solid var(--line-soft);
@@ -239,9 +252,19 @@
   background: rgba(56, 189, 248, 0.08);
 }
 
+.count-strip span,
+.count-strip code {
+  background: rgba(74, 222, 128, 0.08);
+}
+
 .cadence-strip.trusted span,
 .cadence-strip.trusted code {
   border-color: rgba(45, 212, 191, 0.38);
+}
+
+.count-strip.trusted span,
+.count-strip.trusted code {
+  border-color: rgba(74, 222, 128, 0.34);
 }
 
 .material-strip.changed span,
@@ -251,7 +274,8 @@
 }
 
 .material-strip strong,
-.cadence-strip strong {
+.cadence-strip strong,
+.count-strip strong {
   display: block;
   color: var(--text-strong);
   font-size: 14px;
@@ -269,6 +293,13 @@
   display: inline-flex;
   align-items: center;
   color: var(--accent);
+  letter-spacing: 0;
+}
+
+.count-strip code {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ok);
   letter-spacing: 0;
 }
 
@@ -625,6 +656,7 @@
   .room-state-strip,
   .material-strip,
   .cadence-strip,
+  .count-strip,
   .metric-grid {
     grid-template-columns: 1fr;
   }
