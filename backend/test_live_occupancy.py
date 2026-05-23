@@ -19,18 +19,56 @@ class TestLiveOccupancy(unittest.TestCase):
         self.assertEqual(result["class"], "EMPTY")
         self.assertTrue(result["trusted"])
 
-    def test_classifies_occupied_above_threshold_when_quality_is_weak(self):
+    def test_classifies_occupied_above_threshold_when_quality_is_good(self):
         telemetry = {"variance": 8.0}
-        quality = {"status": "WEAK", "reasons": ["rssi_unstable"]}
+        quality = {"status": "GOOD", "reasons": []}
 
         result = classify_occupancy(telemetry, quality, READY_MODEL)
 
         self.assertEqual(result["class"], "OCCUPIED")
         self.assertTrue(result["trusted"])
 
+    def test_trusts_occupied_when_weak_quality_has_only_rssi_outliers(self):
+        telemetry = {"variance": 8.0}
+        quality = {"status": "WEAK", "reasons": ["rssi_outliers"]}
+
+        result = classify_occupancy(telemetry, quality, READY_MODEL)
+
+        self.assertEqual(result["class"], "OCCUPIED")
+        self.assertTrue(result["trusted"])
+
+    def test_returns_unknown_above_threshold_when_weak_quality_has_blocking_reason(self):
+        telemetry = {"variance": 8.0}
+        quality = {"status": "WEAK", "reasons": ["rssi_unstable"]}
+
+        result = classify_occupancy(telemetry, quality, READY_MODEL)
+
+        self.assertEqual(result["class"], "UNKNOWN")
+        self.assertFalse(result["trusted"])
+        self.assertIn("signal_quality_weak_blocked", result["reasons"])
+
     def test_returns_unknown_below_threshold_when_signal_quality_is_weak(self):
         telemetry = {"variance": 4.0}
         quality = {"status": "WEAK", "reasons": ["rssi_unstable"]}
+
+        result = classify_occupancy(telemetry, quality, READY_MODEL)
+
+        self.assertEqual(result["class"], "UNKNOWN")
+        self.assertFalse(result["trusted"])
+        self.assertIn("weak_signal_cannot_confirm_empty", result["reasons"])
+
+    def test_trusts_empty_when_weak_quality_has_only_rssi_outliers(self):
+        telemetry = {"variance": 4.0}
+        quality = {"status": "WEAK", "reasons": ["rssi_outliers"]}
+
+        result = classify_occupancy(telemetry, quality, READY_MODEL)
+
+        self.assertEqual(result["class"], "EMPTY")
+        self.assertTrue(result["trusted"])
+
+    def test_keeps_low_fps_as_unknown_even_when_below_threshold(self):
+        telemetry = {"variance": 4.0}
+        quality = {"status": "WEAK", "reasons": ["low_fps", "rssi_outliers"]}
 
         result = classify_occupancy(telemetry, quality, READY_MODEL)
 
