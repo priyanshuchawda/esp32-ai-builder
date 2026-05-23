@@ -90,6 +90,8 @@ def build_probe_lines(
             ),
         ]
     )
+    for action in recommend_next_actions(config_summary, udp_summary, quality_summary, serial_result):
+        lines.append(f"NEXT_ACTION {action}")
     return lines
 
 
@@ -226,6 +228,35 @@ def probe_serial(port: str, baud: int, seconds: float) -> SerialProbeResult:
     return SerialProbeResult(status="PASS" if lines else "WARN", port=port, lines=lines)
 
 
+def recommend_next_actions(
+    config_summary: dict | None,
+    udp_summary: dict,
+    quality_summary: dict,
+    serial_result: SerialProbeResult | None,
+) -> list[str]:
+    actions: list[str] = []
+
+    if config_summary is not None and config_summary.get("status") == "FAIL":
+        if config_summary.get("reason") == "target_ip_mismatch":
+            actions.append("update_firmware_target_ip")
+
+    no_udp = udp_summary.get("status") == "FAIL" and udp_summary.get("reason") == "no_packets"
+    serial_locked = serial_result is not None and serial_result.status == "FAIL"
+    if serial_locked and serial_result.error_type == "PermissionError":
+        actions.append("release_or_replug_serial_port")
+
+    if no_udp:
+        actions.append("reset_or_reflash_esp_streaming_firmware")
+
+    reasons = set(quality_summary.get("reasons", []))
+    if "low_fps" in reasons or "very_low_fps" in reasons:
+        actions.append("improve_wifi_signal_or_reduce_receiver_load")
+    if "rssi_unstable" in reasons:
+        actions.append("stabilize_esp_router_position")
+
+    return _dedupe(actions)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a compact ESP32 live health probe.")
     parser.add_argument("--duration", type=int, default=30)
@@ -312,6 +343,16 @@ def _format_modes(modes: dict[int, int]) -> str:
 
 def _join_reasons(reasons: list[str]) -> str:
     return ",".join(reasons) if reasons else "none"
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
 
 
 if __name__ == "__main__":
