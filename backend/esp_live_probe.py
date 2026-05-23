@@ -114,7 +114,7 @@ def run_udp_probe(
     udp_port: int,
     duration_sec: int,
     min_fps: float,
-) -> tuple[dict, dict, dict[int, int], dict, dict, dict, dict]:
+) -> tuple[dict, dict, dict[int, int], dict, dict, dict, dict, dict]:
     from backend.csi_fingerprint import build_fingerprint
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_spectrogram import build_spectrogram
@@ -172,10 +172,11 @@ def run_udp_probe(
     quality_summary = quality.summary(now=time.time())
     telemetry = with_presence_confidence(dsp.process_telemetry(), quality_summary)
     occupancy = classify_occupancy(telemetry, quality_summary, load_evaluator_report())
+    telemetry["occupancy"] = occupancy
     fingerprint = build_fingerprint(latest_amplitudes, bins=16)
     spectrogram = build_spectrogram(recent_frames, time_bins=24, subcarrier_bins=16)
     motion_cadence = analyze_motion_cadence(motion_samples, quality_status=quality_summary.get("status"))
-    return udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram, motion_cadence
+    return udp_summary, quality_summary, modes, occupancy, telemetry, fingerprint, spectrogram, motion_cadence
 
 
 def load_firmware_network_config(path: Path | None = None, text: str | None = None) -> dict:
@@ -309,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.serial_port:
         serial_result = probe_serial(args.serial_port, args.serial_baud, args.serial_seconds)
 
-    udp_summary, quality_summary, modes, occupancy, fingerprint, _spectrogram, _motion_cadence = run_udp_probe(
+    udp_summary, quality_summary, modes, occupancy, _telemetry, fingerprint, _spectrogram, _motion_cadence = run_udp_probe(
         bind_ip=args.bind_ip,
         udp_port=args.udp_port,
         duration_sec=args.duration,
