@@ -131,8 +131,53 @@ BUFFER_SIZE = 200
 @st.cache_resource
 def get_global_resources():
     """Returns persistent, shared objects across sessions and reloads to avoid leaks."""
+    standby_telemetry = {
+        "presence": False,
+        "resp_bpm": 0.0,
+        "heart_bpm": 0.0,
+        "variance": 0.0,
+        "fall_alert": False,
+        "acceleration": 0.0,
+        "rep_count": 0,
+        "apnea_status": {
+            "is_apnea": False,
+            "is_hypopnea": False,
+            "current_event_duration": 0.0,
+            "baseline_br": 0.0,
+            "ahi": 0.0,
+            "hours": 0.0,
+            "events_count": 0,
+            "severity": "Insufficient data",
+            "events": [],
+            "summary": {
+                "total_events": 0,
+                "apneas": 0,
+                "hypopneas": 0,
+                "avg_apnea_duration": 0.0,
+                "avg_hypopnea_duration": 0.0,
+                "max_duration": 0.0,
+                "baseline_br": 0.0
+            }
+        }
+    }
+    standby_stats = {
+        "node_id": "Offline (Standby)",
+        "seq": "N/A",
+        "rssi": -95,
+        "noise": -96,
+        "freq_mhz": 0,
+        "fps": 0.0
+    }
     return {
         "queue": queue.Queue(maxsize=1000),
+        "latest_package": {
+            "stats": standby_stats,
+            "telemetry": standby_telemetry,
+            "raw_history": [],
+            "filtered_history": [],
+            "resp_history": []
+        },
+        "lock": threading.Lock(),
         "shutdown_event": threading.Event(),
         "config": {
             "presence_threshold": 0.6,
@@ -291,6 +336,9 @@ class RuViewDSP:
         self.apnea_detector = ApneaDetector()
         self.last_apnea_check_time = 0.0
         
+        # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
+        self._filter_cache = {}
+        
     def add_sample(self, raw_val):
         self.raw_history.append(raw_val)
         
@@ -320,10 +368,15 @@ class RuViewDSP:
         
         if HAS_SCIPY:
             try:
-                nyq = 0.5 * self.fps
-                low_norm = low / nyq
-                high_norm = high / nyq
-                b, a = butter(2, [low_norm, high_norm], btype='bandpass')
+                cache_key = (low, high, self.fps)
+                if cache_key in self._filter_cache:
+                    b, a = self._filter_cache[cache_key]
+                else:
+                    nyq = 0.5 * self.fps
+                    low_norm = low / nyq
+                    high_norm = high / nyq
+                    b, a = butter(2, [low_norm, high_norm], btype='bandpass')
+                    self._filter_cache[cache_key] = (b, a)
                 y = lfilter(b, a, data_detrended)
                 return y[-1]
             except Exception:
@@ -513,12 +566,16 @@ def parse_adr018_packet(data):
         return None
 
 def udp_receiver_loop(port, shutdown_event, data_queue, config):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        sock.bind(("0.0.0.0", port))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("", port))
     except Exception as e:
-        data_queue.put({"error": f"Failed to bind port {port}: {e}"})
+        if hasattr(data_queue, "put"):
+            data_queue.put({"error": f"Failed to bind port {port}: {e}"})
+        else:
+            with data_queue["lock"]:
+                data_queue["latest_package"] = {"error": f"Failed to bind port {port}: {e}"}
         return
 
     sock.settimeout(0.2)
@@ -564,10 +621,14 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                     "resp_history": list(dsp.resp_history)
                 }
                 
-                if data_queue.full():
-                    try: data_queue.get_nowait()
-                    except queue.Empty: pass
-                data_queue.put(ui_package)
+                if hasattr(data_queue, "put"):
+                    if data_queue.full():
+                        try: data_queue.get_nowait()
+                        except queue.Empty: pass
+                    data_queue.put(ui_package)
+                else:
+                    with data_queue["lock"]:
+                        data_queue["latest_package"] = ui_package
         except socket.timeout:
             # Report offline status if no packets received for 3 seconds
             now = time.time()
@@ -591,10 +652,14 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                     "filtered_history": list(dsp.filtered_history),
                     "resp_history": list(dsp.resp_history)
                 }
-                if data_queue.full():
-                    try: data_queue.get_nowait()
-                    except queue.Empty: pass
-                data_queue.put(ui_package)
+                if hasattr(data_queue, "put"):
+                    if data_queue.full():
+                        try: data_queue.get_nowait()
+                        except queue.Empty: pass
+                    data_queue.put(ui_package)
+                else:
+                    with data_queue["lock"]:
+                        data_queue["latest_package"] = ui_package
                 last_fps_time = now
         except Exception:
             continue
@@ -607,7 +672,11 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
     try:
         ser = serial.Serial(port_name, baud_rate, timeout=0.2)
     except Exception as e:
-        data_queue.put({"error": f"Failed to open COM port {port_name}: {e}"})
+        if hasattr(data_queue, "put"):
+            data_queue.put({"error": f"Failed to open COM port {port_name}: {e}"})
+        else:
+            with data_queue["lock"]:
+                data_queue["latest_package"] = {"error": f"Failed to open COM port {port_name}: {e}"}
         return
 
     dsp = RuViewDSP(fps=50.0)
@@ -659,10 +728,14 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                     "resp_history": list(dsp.resp_history)
                 }
                 
-                if data_queue.full():
-                    try: data_queue.get_nowait()
-                    except queue.Empty: pass
-                data_queue.put(ui_package)
+                if hasattr(data_queue, "put"):
+                    if data_queue.full():
+                        try: data_queue.get_nowait()
+                        except queue.Empty: pass
+                    data_queue.put(ui_package)
+                else:
+                    with data_queue["lock"]:
+                        data_queue["latest_package"] = ui_package
         except Exception:
             time.sleep(0.01)
             continue
@@ -811,10 +884,14 @@ def simulator_loop(shutdown_event, data_queue, config):
             "resp_history": list(dsp.resp_history)
         }
         
-        if data_queue.full():
-            try: data_queue.get_nowait()
-            except queue.Empty: pass
-        data_queue.put(ui_package)
+        if hasattr(data_queue, "put"):
+            if data_queue.full():
+                try: data_queue.get_nowait()
+                except queue.Empty: pass
+            data_queue.put(ui_package)
+        else:
+            with data_queue["lock"]:
+                data_queue["latest_package"] = ui_package
         
         time.sleep(0.04) # 25 Hz simulation rate
 
@@ -828,11 +905,57 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
         try: data_queue.get_nowait()
         except queue.Empty: break
         
+    standby_telemetry = {
+        "presence": False,
+        "resp_bpm": 0.0,
+        "heart_bpm": 0.0,
+        "variance": 0.0,
+        "fall_alert": False,
+        "acceleration": 0.0,
+        "rep_count": 0,
+        "apnea_status": {
+            "is_apnea": False,
+            "is_hypopnea": False,
+            "current_event_duration": 0.0,
+            "baseline_br": 0.0,
+            "ahi": 0.0,
+            "hours": 0.0,
+            "events_count": 0,
+            "severity": "Insufficient data",
+            "events": [],
+            "summary": {
+                "total_events": 0,
+                "apneas": 0,
+                "hypopneas": 0,
+                "avg_apnea_duration": 0.0,
+                "avg_hypopnea_duration": 0.0,
+                "max_duration": 0.0,
+                "baseline_br": 0.0
+            }
+        }
+    }
+    standby_stats = {
+        "node_id": "Offline (Standby)",
+        "seq": "N/A",
+        "rssi": -95,
+        "noise": -96,
+        "freq_mhz": 0,
+        "fps": 0.0
+    }
+    with resources["lock"]:
+        resources["latest_package"] = {
+            "stats": standby_stats,
+            "telemetry": standby_telemetry,
+            "raw_history": [],
+            "filtered_history": [],
+            "resp_history": []
+        }
+        
     if source_mode == "WiFi UDP Receiver":
         t = threading.Thread(
             name="RuViewReceiverThread",
             target=udp_receiver_loop,
-            args=(port_to_bind, thread_shutdown, data_queue, config),
+            args=(port_to_bind, thread_shutdown, resources, config),
             daemon=True
         )
         t.start()
@@ -840,7 +963,7 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
         t = threading.Thread(
             name="RuViewReceiverThread",
             target=serial_receiver_loop,
-            args=(com_port_selected, serial_baud, thread_shutdown, data_queue, config),
+            args=(com_port_selected, serial_baud, thread_shutdown, resources, config),
             daemon=True
         )
         t.start()
@@ -848,7 +971,7 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
         t = threading.Thread(
             name="RuViewReceiverThread",
             target=simulator_loop,
-            args=(thread_shutdown, data_queue, config),
+            args=(thread_shutdown, resources, config),
             daemon=True
         )
         t.start()
@@ -1586,72 +1709,6 @@ def draw_indicators_and_keys(telemetry, container):
 
 # --- 3-Column Dashboard Structure ---
 
-ui_fall_alert = st.empty()
-
-col_left, col_mid, col_right = st.columns([1.0, 1.8, 1.2])
-
-with col_left:
-    ui_vital_signs = st.empty()
-    ui_apnea = st.empty()
-
-with col_mid:
-    # Header block inside the 3D observatory
-    col_mid_title, col_mid_selector = st.columns([2, 1])
-    with col_mid_title:
-        st.markdown("""
-        <div style="margin-bottom: 5px;">
-            <h1 style="margin: 0; font-family: 'Fira Code', monospace; color: #ffffff; font-size: 2.1rem; font-weight: bold; line-height: 1.1;">
-                <span style="color: #33ff33;">π</span> RuView
-            </h1>
-            <div style="color: #8892b0; font-family: monospace; font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px;">
-                WIFI DENSEPOSE SENSING OBSERVATORY
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with col_mid_selector:
-        badge_and_select_col1, badge_and_select_col2 = st.columns([1, 2.5])
-        with badge_and_select_col1:
-            ui_status_pill = st.empty()
-        with badge_and_select_col2:
-            if source_mode == "Signal Simulator":
-                scenario_mode_selected = st.selectbox(
-                    "Scenario Select",
-                    ["Auto Cycle", "Fitness", "Normal Sleeping", "Apnea", "Hypopnea", "Fall", "Idle", "Empty Room"],
-                    label_visibility="collapsed",
-                    key="scenario_select"
-                )
-                config["simulation_mode"] = scenario_mode_selected
-            else:
-                st.selectbox(
-                    "Scenario Select",
-                    ["Live Ingestion"],
-                    disabled=True,
-                    label_visibility="collapsed",
-                    key="scenario_select_live"
-                )
-                
-    st.markdown("""
-    <div style="color: #8892b0; font-style: italic; font-size: 0.85rem; margin-top: 5px; margin-bottom: 12px; font-family: 'Fira Code', monospace;">
-        Rep counting and exercise classification from body kinematics.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    ui_3d_observatory = st.empty()
-    ui_indicators = st.empty()
-
-with col_right:
-    ui_wifi_signal = st.empty()
-    ui_presence = st.empty()
-    ui_apnea_events = st.empty()
-
-st.markdown("### 📈 Live Signal Waves")
-chart_col1, chart_col2 = st.columns(2)
-with chart_col1:
-    ui_csi_chart = st.empty()
-with chart_col2:
-    ui_resp_chart = st.empty()
-
 # Custom dark template for Plotly graphs to match terminal
 plotly_layout_args = dict(
     paper_bgcolor='#090d12',
@@ -1676,105 +1733,145 @@ plotly_layout_args = dict(
     height=250,
 )
 
-# Render initial UI in standby state (so page isn't blank on start)
-if not is_running:
-    # Update status indicator badge
-    ui_status_pill.markdown("""
-    <div style='margin-top: 5px; text-align: right;'>
-        <span style='background-color: rgba(106, 115, 125, 0.1); border: 1px solid #6a737d; color: #6a737d; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px;'>○ STANDBY</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    draw_vital_signs(standby_telemetry, ui_vital_signs)
-    draw_sleep_apnea(standby_telemetry, ui_apnea)
-    draw_wifi_signal(standby_stats, standby_telemetry, [], ui_wifi_signal)
-    draw_presence(standby_telemetry, ui_presence)
-    draw_apnea_events(standby_telemetry, ui_apnea_events)
-    
-    # Standby 3D Observatory Figure (no human)
-    fig_3d = generate_3d_observatory(standby_telemetry, standby_stats)
-    ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
-    
-    draw_indicators_and_keys(standby_telemetry, ui_indicators)
-    
-    st.info("🔮 Receiver standby. Select ingestion parameters in the sidebar and click **Launch**.")
-    st.markdown("""
-    ### 💻 Console Instructions:
-    1. Select data source mode from the sidebar options.
-    2. Click **Launch** to initialize the ingestion and processing loops.
-    
-    *If running offline, select **Signal Simulator** to test the real-time DSP filters, telemetry heuristics, and live 3D skeleton.*
-    """)
+@st.fragment(run_every=0.5)
+def render_dashboard(is_running, source_mode):
+    # Extract the latest package safely from the global resources under lock
+    with resources["lock"]:
+        latest_package = resources["latest_package"]
+        
+    # Check for error reported by background thread
+    if latest_package and "error" in latest_package:
+        st.error(latest_package["error"])
+        thread_shutdown.set()
+        st.rerun()
 
-# Active ingestion loop
-if is_running:
-    # Update status indicator badge
-    ui_status_pill.markdown("""
-    <div style='margin-top: 5px; text-align: right;'>
-        <span style='background-color: rgba(51, 255, 51, 0.1); border: 1px solid #33ff33; color: #33ff33; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px;'>● DEMO</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Extract the latest package from background thread
-    latest_package = None
-    while not data_queue.empty():
-        try:
-            latest_package = data_queue.get_nowait()
-        except queue.Empty:
-            break
-            
-    if latest_package:
+    # Determine stats, telemetry, and histories to render
+    if is_running and latest_package:
         stats = latest_package["stats"]
         telemetry = latest_package["telemetry"]
         raw_hist = latest_package["raw_history"]
         filt_hist = latest_package["filtered_history"]
         resp_hist = latest_package["resp_history"]
         
-        # Check for error reported by background thread
-        if "error" in latest_package:
-            st.error(latest_package["error"])
-            thread_shutdown.set()
-            st.rerun()
+        status_text = "● DEMO" if source_mode == "Signal Simulator" else "● LIVE"
+        status_color = "#33ff33"
+        status_bg = "rgba(51, 255, 51, 0.1)"
+    else:
+        stats = standby_stats
+        telemetry = standby_telemetry
+        raw_hist = []
+        filt_hist = []
+        resp_hist = []
         
-        # 1. Fall warning light banner
-        if telemetry["fall_alert"]:
-            ui_fall_alert.markdown("<div class='fall-banner'>⚠️ FALL DETECTED!</div>", unsafe_allow_html=True)
-        else:
-            ui_fall_alert.empty()
+        status_text = "○ STANDBY"
+        status_color = "#6a737d"
+        status_bg = "rgba(106, 115, 125, 0.1)"
+
+    # Fall warning light banner
+    if is_running and telemetry.get("fall_alert", False):
+        st.markdown("<div class='fall-banner'>⚠️ FALL DETECTED!</div>", unsafe_allow_html=True)
+
+    col_left, col_mid, col_right = st.columns([1.0, 1.8, 1.2])
+
+    with col_left:
+        draw_vital_signs(telemetry, st)
+        draw_sleep_apnea(telemetry, st)
+
+    with col_mid:
+        # Header block inside the 3D observatory
+        col_mid_title, col_mid_selector = st.columns([2, 1])
+        with col_mid_title:
+            st.markdown("""
+            <div style="margin-bottom: 5px;">
+                <h1 style="margin: 0; font-family: 'Fira Code', monospace; color: #ffffff; font-size: 2.1rem; font-weight: bold; line-height: 1.1;">
+                    <span style="color: #33ff33;">π</span> RuView
+                </h1>
+                <div style="color: #8892b0; font-family: monospace; font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px;">
+                    WIFI DENSEPOSE SENSING OBSERVATORY
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
-        # Draw telemetry cards
-        draw_vital_signs(telemetry, ui_vital_signs)
-        draw_sleep_apnea(telemetry, ui_apnea)
-        draw_wifi_signal(stats, telemetry, raw_hist, ui_wifi_signal)
-        draw_presence(telemetry, ui_presence)
-        draw_apnea_events(telemetry, ui_apnea_events)
+        with col_mid_selector:
+            badge_and_select_col1, badge_and_select_col2 = st.columns([1, 2.5])
+            with badge_and_select_col1:
+                st.markdown(f"""
+                <div style='margin-top: 5px; text-align: right;'>
+                    <span style='background-color: {status_bg}; border: 1px solid {status_color}; color: {status_color}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px;'>{status_text}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            with badge_and_select_col2:
+                if source_mode == "Signal Simulator":
+                    scenario_mode_selected = st.selectbox(
+                        "Scenario Select",
+                        ["Auto Cycle", "Fitness", "Normal Sleeping", "Apnea", "Hypopnea", "Fall", "Idle", "Empty Room"],
+                        label_visibility="collapsed",
+                        key="scenario_select"
+                    )
+                    config["simulation_mode"] = scenario_mode_selected
+                else:
+                    st.selectbox(
+                        "Scenario Select",
+                        ["Live Ingestion"],
+                        disabled=True,
+                        label_visibility="collapsed",
+                        key="scenario_select_live"
+                    )
+                    
+        st.markdown("""
+        <div style="color: #8892b0; font-style: italic; font-size: 0.85rem; margin-top: 5px; margin-bottom: 12px; font-family: 'Fira Code', monospace;">
+            Rep counting and exercise classification from body kinematics.
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Draw bottom indicators
-        draw_indicators_and_keys(telemetry, ui_indicators)
-        
-        # Draw 3D Observatory
         fig_3d = generate_3d_observatory(telemetry, stats)
-        ui_3d_observatory.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig_3d, use_container_width=True, config={'displayModeBar': False}, key="observatory_3d_plot")
         
-        # Graph 1: Raw & Filtered CSI
-        fig_csi = go.Figure()
-        fig_csi.add_trace(go.Scatter(y=raw_hist, mode='lines', name='Raw Signal', line=dict(color='#00ffcc', width=1.5)))
-        fig_csi.add_trace(go.Scatter(y=filt_hist, mode='lines', name='Filtered CSI', line=dict(color='#33ff33', width=2.0)))
-        fig_csi.update_layout(
-            title="Raw Subcarrier Magnitude (Mean)",
-            **plotly_layout_args
-        )
-        ui_csi_chart.plotly_chart(fig_csi, use_container_width=True)
+        draw_indicators_and_keys(telemetry, st)
+
+    with col_right:
+        draw_wifi_signal(stats, telemetry, raw_hist, st)
+        draw_presence(telemetry, st)
+        draw_apnea_events(telemetry, st)
+
+    st.markdown("### 📈 Live Signal Waves")
+    chart_col1, chart_col2 = st.columns(2)
+    
+    # Graph 1: Raw & Filtered CSI
+    fig_csi = go.Figure()
+    y_raw = raw_hist if raw_hist else [25.0] * 50
+    y_filt = filt_hist if filt_hist else [25.0] * 50
+    fig_csi.add_trace(go.Scatter(y=y_raw, mode='lines', name='Raw Signal', line=dict(color='#00ffcc', width=1.5)))
+    fig_csi.add_trace(go.Scatter(y=y_filt, mode='lines', name='Filtered CSI', line=dict(color='#33ff33', width=2.0)))
+    fig_csi.update_layout(
+        title="Raw Subcarrier Magnitude (Mean)",
+        **plotly_layout_args
+    )
+    with chart_col1:
+        st.plotly_chart(fig_csi, use_container_width=True, key="csi_history_plot")
         
-        # Graph 2: Extracted Respiration Waveform
-        fig_resp = go.Figure()
-        fig_resp.add_trace(go.Scatter(y=resp_hist, mode='lines', name='Respiration Waveform', line=dict(color='#ff5555', width=2.0)))
-        fig_resp.update_layout(
-            title="Extracted Respiration Waveform (0.1-0.5 Hz)",
-            **plotly_layout_args
-        )
-        ui_resp_chart.plotly_chart(fig_resp, use_container_width=True)
+    # Graph 2: Extracted Respiration Waveform
+    fig_resp = go.Figure()
+    y_resp = resp_hist if resp_hist else [0.0] * 50
+    fig_resp.add_trace(go.Scatter(y=y_resp, mode='lines', name='Respiration Waveform', line=dict(color='#ff5555', width=2.0)))
+    fig_resp.update_layout(
+        title="Extracted Respiration Waveform (0.1-0.5 Hz)",
+        **plotly_layout_args
+    )
+    with chart_col2:
+        st.plotly_chart(fig_resp, use_container_width=True, key="respiration_history_plot")
+
+    if not is_running:
+        st.info("🔮 Receiver standby. Select ingestion parameters in the sidebar and click **Launch**.")
+        st.markdown("""
+        ### 💻 Console Instructions:
+        1. Select data source mode from the sidebar options.
+        2. Click **Launch** to initialize the ingestion and processing loops.
         
-    time.sleep(0.08) # 12 Hz UI refresh rate for smooth rendering with minimal CPU overhead
-    st.rerun()
+        *If running offline, select **Signal Simulator** to test the real-time DSP filters, telemetry heuristics, and live 3D skeleton.*
+        """)
+
+# Run fragment render block
+render_dashboard(is_running, source_mode)
+
 

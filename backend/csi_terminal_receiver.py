@@ -55,6 +55,9 @@ class RuViewDSP:
         self.last_rep_time = 0.0
         self.last_presence_time = time.time()
         
+        # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
+        self._filter_cache = {}
+        
     def add_sample(self, raw_val):
         self.raw_history.append(raw_val)
         
@@ -85,10 +88,15 @@ class RuViewDSP:
         
         if HAS_SCIPY:
             try:
-                nyq = 0.5 * self.fps
-                low_norm = low / nyq
-                high_norm = high / nyq
-                b, a = butter(2, [low_norm, high_norm], btype='bandpass')
+                cache_key = (low, high, self.fps)
+                if cache_key in self._filter_cache:
+                    b, a = self._filter_cache[cache_key]
+                else:
+                    nyq = 0.5 * self.fps
+                    low_norm = low / nyq
+                    high_norm = high / nyq
+                    b, a = butter(2, [low_norm, high_norm], btype='bandpass')
+                    self._filter_cache[cache_key] = (b, a)
                 y = lfilter(b, a, data_detrended)
                 return y[-1]
             except Exception:
