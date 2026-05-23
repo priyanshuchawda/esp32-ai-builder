@@ -22,8 +22,10 @@ from rich.text import Text
 
 try:
     from backend.csi_calibration import PresenceCalibration
+    from backend.csi_quality import SignalQualityMonitor
 except ImportError:
     from csi_calibration import PresenceCalibration
+    from csi_quality import SignalQualityMonitor
 
 # Try importing scipy for butterworth bandpass filters
 try:
@@ -292,6 +294,10 @@ def make_layout(stats, telemetry, dsp):
     net_table.add_row("RSSI:", f"{stats.get('rssi', 'N/A')} dBm")
     net_table.add_row("Noise Floor:", f"{stats.get('noise', 'N/A')} dBm")
     net_table.add_row("Rx Speed (FPS):", f"[bold green]{stats.get('fps', 0.0):.1f} FPS[/bold green]")
+    signal_quality = stats.get("signal_quality", {})
+    quality_status = signal_quality.get("status", "BAD")
+    quality_reasons = ", ".join(signal_quality.get("reasons", [])[:2]) or "stable"
+    net_table.add_row("Signal Quality:", f"{quality_status} ({quality_reasons})")
     
     net_panel = Panel(net_table, title="[bold white]Network & Radio[/bold white]", border_style="green")
     
@@ -368,13 +374,15 @@ def main():
     
     # DSP & Stats Inits
     dsp = RuViewDSP(fps=50.0)
+    quality_monitor = SignalQualityMonitor()
     stats = {
         "node_id": "Offline",
         "seq": 0,
         "rssi": 0,
         "noise": 0,
         "freq_mhz": 0,
-        "fps": 0.0
+        "fps": 0.0,
+        "signal_quality": quality_monitor.summary()
     }
     
     packet_counter = 0
@@ -390,7 +398,14 @@ def main():
                     packet = parse_adr018_packet(data)
                     if packet:
                         packet_counter += 1
+                        quality_monitor.record_packet(
+                            seq=packet["seq"],
+                            rssi=packet["rssi"],
+                            n_subcarriers=packet["n_subcarriers"],
+                            timestamp=time.time(),
+                        )
                         stats.update(packet)
+                        stats["signal_quality"] = quality_monitor.summary()
                         
                         # Add sample to DSP
                         dsp.add_sample(packet["raw_signal"])
@@ -421,6 +436,7 @@ def main():
                     if now - last_fps_time > 3.0:
                         stats["fps"] = 0.0
                         stats["node_id"] = "Offline (No Signal)"
+                        stats["signal_quality"] = quality_monitor.summary(now=now)
                     live.update(make_layout(stats, telemetry, dsp))
                     last_ui_update = now
                     
