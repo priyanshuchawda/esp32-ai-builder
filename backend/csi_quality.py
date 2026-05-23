@@ -35,6 +35,11 @@ class SignalQualityMonitor:
         seqs = [sample["seq"] for sample in self.samples]
         rssis = [sample["rssi"] for sample in self.samples]
         subcarrier_modes = dict(Counter(sample["n_subcarriers"] for sample in self.samples))
+        dominant_subcarriers, dominant_subcarrier_count = max(
+            subcarrier_modes.items(),
+            key=lambda item: (item[1], item[0]),
+        )
+        dominant_subcarrier_ratio = dominant_subcarrier_count / len(self.samples)
         sequence_gaps = sum(1 for prev, cur in zip(seqs, seqs[1:]) if cur != prev + 1)
         rssi_spread = max(rssis) - min(rssis)
 
@@ -62,7 +67,7 @@ class SignalQualityMonitor:
             reasons.append("rssi_unstable")
             if status != "BAD":
                 status = "WEAK"
-        if len(subcarrier_modes) > 1:
+        if len(subcarrier_modes) > 1 and dominant_subcarrier_ratio < 0.9:
             reasons.append("mixed_subcarriers")
             if status != "BAD":
                 status = "WEAK"
@@ -77,6 +82,8 @@ class SignalQualityMonitor:
             "rssi_max": max(rssis),
             "rssi_spread": rssi_spread,
             "subcarrier_modes": subcarrier_modes,
+            "dominant_subcarriers": dominant_subcarriers,
+            "dominant_subcarrier_ratio": round(dominant_subcarrier_ratio, 3),
             "reasons": reasons,
         }
 
@@ -96,5 +103,7 @@ class SignalQualityMonitor:
             "rssi_max": 0,
             "rssi_spread": 0,
             "subcarrier_modes": {},
+            "dominant_subcarriers": 0,
+            "dominant_subcarrier_ratio": 0.0,
             "reasons": reasons,
         }
