@@ -24,6 +24,7 @@ try:
     from backend.csi_calibration import PresenceCalibration
     from backend.csi_confidence import evaluate_presence_confidence
     from backend.csi_filters import StreamingHampelFilter
+    from backend.csi_motion import MotionLevelEstimator, gate_motion_for_quality
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_recommendations import build_signal_recommendations
     from backend.csi_subcarriers import SubcarrierSelector
@@ -31,6 +32,7 @@ except ImportError:
     from csi_calibration import PresenceCalibration
     from csi_confidence import evaluate_presence_confidence
     from csi_filters import StreamingHampelFilter
+    from csi_motion import MotionLevelEstimator, gate_motion_for_quality
     from csi_quality import SignalQualityMonitor
     from csi_recommendations import build_signal_recommendations
     from csi_subcarriers import SubcarrierSelector
@@ -61,6 +63,8 @@ class RuViewDSP:
         self.fall_threshold = 12.0
         self.presence_calibration = PresenceCalibration(active=False)
         self.spike_filter = StreamingHampelFilter(window_size=9, threshold=3.0, min_spike_delta=5.0)
+        self.motion_estimator = MotionLevelEstimator()
+        self.motion_state = self.motion_estimator.summary()
         
         # Debouncing/cooldowns
         self.last_fall_time = 0.0
@@ -88,6 +92,7 @@ class RuViewDSP:
         return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
+        self.motion_state = self.motion_estimator.update(raw_val)
         clean_val = self.spike_filter.update(raw_val)
         self.raw_history.append(clean_val)
         if self.presence_calibration.active:
@@ -164,6 +169,7 @@ class RuViewDSP:
                 "effective_presence_threshold": effective_presence_threshold,
                 "calibration": calibration_summary,
                 "spikes_filtered": self.spike_filter.replaced_count,
+                "motion": self.motion_state,
             }
             
         raw_arr = np.array(self.raw_history)
@@ -239,6 +245,7 @@ class RuViewDSP:
             "effective_presence_threshold": effective_presence_threshold,
             "calibration": self.presence_calibration.summary(),
             "spikes_filtered": self.spike_filter.replaced_count,
+            "motion": self.motion_state,
         }
         
     def _compute_bpm_zero_crossing(self, signal):
@@ -279,6 +286,7 @@ def draw_ascii_graph(history, width=50, height=8):
 
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
+    enriched["motion"] = gate_motion_for_quality(enriched.get("motion", {}), signal_quality)
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
     enriched["recommendations"] = build_signal_recommendations(
         signal_quality,
@@ -311,6 +319,8 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Breathing Rate:", f"[bold yellow]{telemetry['resp_bpm']} BPM[/bold yellow]" if telemetry['resp_bpm'] > 0 else "Calculating...")
     table.add_row("Est. Heart Rate:", f"[bold magenta]{int(telemetry['heart_bpm'])} BPM[/bold magenta]" if telemetry['heart_bpm'] > 0 else "Calculating...")
     table.add_row("Signal Variance:", f"{telemetry['variance']:.4f}")
+    motion = telemetry.get("motion", {})
+    table.add_row("Motion Level:", f"{motion.get('display_level', motion.get('level', 'STILL'))} {float(motion.get('score', 0.0) or 0.0):.3f}")
     table.add_row("Presence Threshold:", f"{telemetry.get('effective_presence_threshold', 0.0):.4f}")
     table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
     table.add_row("Confidence Gate:", f"{confidence_score}% {confidence_label}")

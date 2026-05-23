@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from backend.csi_calibration import PresenceCalibration
 from backend.csi_confidence import evaluate_presence_confidence
 from backend.csi_filters import StreamingHampelFilter
+from backend.csi_motion import MotionLevelEstimator, gate_motion_for_quality
 from backend.csi_quality import SignalQualityMonitor
 from backend.csi_recommendations import build_signal_recommendations
 from backend.csi_subcarriers import SubcarrierSelector
@@ -159,6 +160,7 @@ def default_recommendations():
 
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
+    enriched["motion"] = gate_motion_for_quality(enriched.get("motion", {}), signal_quality)
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
     enriched["recommendations"] = build_signal_recommendations(
         signal_quality,
@@ -411,6 +413,8 @@ class RuViewDSP:
         self.last_apnea_check_time = 0.0
         self.presence_calibration = PresenceCalibration(active=False)
         self.spike_filter = StreamingHampelFilter(window_size=9, threshold=3.0, min_spike_delta=5.0)
+        self.motion_estimator = MotionLevelEstimator()
+        self.motion_state = self.motion_estimator.summary()
         
         # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
         self._filter_cache = {}
@@ -428,6 +432,7 @@ class RuViewDSP:
         return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
+        self.motion_state = self.motion_estimator.update(raw_val)
         clean_val = self.spike_filter.update(raw_val)
         self.raw_history.append(clean_val)
         if self.presence_calibration.active:
@@ -502,6 +507,7 @@ class RuViewDSP:
                 "effective_presence_threshold": effective_presence_threshold,
                 "calibration": calibration_summary,
                 "spikes_filtered": self.spike_filter.replaced_count,
+                "motion": self.motion_state,
                 "apnea_status": {
                     "is_apnea": False,
                     "is_hypopnea": False,
@@ -602,6 +608,7 @@ class RuViewDSP:
             "effective_presence_threshold": effective_presence_threshold,
             "calibration": self.presence_calibration.summary(),
             "spikes_filtered": self.spike_filter.replaced_count,
+            "motion": self.motion_state,
             "apnea_status": {
                 "is_apnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "apnea",
                 "is_hypopnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "hypopnea",
@@ -1784,6 +1791,9 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     presence = telemetry.get("presence", False)
     spikes_filtered = int(telemetry.get("spikes_filtered", 0))
     signal_quality = stats.get("signal_quality", {})
+    motion_state = telemetry.get("motion", {})
+    motion_level = motion_state.get("display_level", motion_state.get("level", "STILL"))
+    motion_score = float(motion_state.get("score", 0.0) or 0.0)
     quality_status = signal_quality.get("status", "BAD")
     quality_reasons = signal_quality.get("reasons", [])
     quality_color = {
@@ -1810,8 +1820,7 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         """
     
     # Motion calculations
-    motion_val = variance * 0.05 if presence else (0.002 + np.random.uniform(-0.001, 0.001))
-    if motion_val < 0: motion_val = 0.0
+    motion_val = motion_score if presence else 0.0
     
     persons_count = 1 if human_confirmed else 0
     if human_confirmed:
@@ -1883,7 +1892,7 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
             <span style='color: #8892b0; font-family: monospace;'>Motion</span>
-            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{motion_val:.3f}</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{motion_level} {motion_val:.3f}</span>
         </div>
 
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
