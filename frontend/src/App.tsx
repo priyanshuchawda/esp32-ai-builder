@@ -83,6 +83,20 @@ type DemoPayload = {
   capabilities: string[]
 }
 
+type LiveProbePayload = {
+  source: string
+  duration_sec: number
+  overall_status: string
+  udp: {
+    status: string
+    reason: string
+    packets: number
+    fps: number
+  }
+  snapshot: ScenarioSnapshot
+  next_actions: string[]
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
 
 const scenarioLabels: Record<string, string> = {
@@ -242,6 +256,9 @@ function App() {
   const [payload, setPayload] = useState<DemoPayload>(fallbackPayload)
   const [selectedScenario, setSelectedScenario] = useState('occupied_still')
   const [apiStatus, setApiStatus] = useState<'connecting' | 'online' | 'fallback'>('connecting')
+  const [liveProbe, setLiveProbe] = useState<LiveProbePayload | null>(null)
+  const [liveProbeStatus, setLiveProbeStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [liveProbeError, setLiveProbeError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -270,8 +287,28 @@ function App() {
     return () => controller.abort()
   }, [selectedScenario])
 
+  function runLiveProbe() {
+    setLiveProbeStatus('running')
+    setLiveProbeError('')
+    fetch(`${API_BASE}/api/judge-live?duration=5&udp_port=5005`)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Live probe returned ${response.status}`)
+        }
+        return response.json() as Promise<LiveProbePayload>
+      })
+      .then((data) => {
+        setLiveProbe(data)
+        setLiveProbeStatus('done')
+      })
+      .catch((error: unknown) => {
+        setLiveProbeError(error instanceof Error ? error.message : 'Live probe failed')
+        setLiveProbeStatus('error')
+      })
+  }
+
   const selected = payload.selected
-  const live = payload.live
+  const live = liveProbe?.snapshot ?? payload.live
   const selectedValues = useMemo(
     () => fingerprintValues(selected.fingerprint.bars),
     [selected.fingerprint.bars],
@@ -372,10 +409,18 @@ function App() {
         <article className="panel live-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Live readiness</p>
+              <p className="eyebrow">{liveProbe ? 'Actual live probe' : 'Live readiness'}</p>
               <h2>{live.summary.demo_state}</h2>
             </div>
-            <Signal size={22} />
+            <button
+              className="probe-button"
+              disabled={liveProbeStatus === 'running'}
+              onClick={runLiveProbe}
+              type="button"
+            >
+              {liveProbeStatus === 'running' ? <RefreshCw size={16} /> : <Signal size={16} />}
+              {liveProbeStatus === 'running' ? 'Running' : 'Live probe'}
+            </button>
           </div>
           <div className="live-meter">
             {liveValues.map((value, index) => (
@@ -385,10 +430,14 @@ function App() {
           <div className="metric-grid compact">
             <Metric icon={<Gauge size={18} />} label="FPS" value={formatNumber(live.quality.fps)} />
             <Metric icon={<ShieldCheck size={18} />} label="Trust" value={live.telemetry.occupancy.trusted ? 'trusted' : 'blocked'} />
-            <Metric icon={<Zap size={18} />} label="Motion" value={live.telemetry.motion.display_level} />
-            <Metric icon={<AlertTriangle size={18} />} label="Source" value={live.source ?? 'live'} />
+            <Metric icon={<Zap size={18} />} label="Packets" value={liveProbe ? String(liveProbe.udp.packets) : '--'} />
+            <Metric icon={<AlertTriangle size={18} />} label="Source" value={(live.source ?? 'live').replaceAll('_', ' ')} />
           </div>
-          <p className="muted">{live.note ?? live.summary.next_action}</p>
+          <p className={`muted ${liveProbeStatus === 'error' ? 'error' : ''}`}>
+            {liveProbeStatus === 'error'
+              ? liveProbeError
+              : liveProbe?.next_actions[0] ?? live.note ?? live.summary.next_action}
+          </p>
         </article>
 
         <article className="panel pipeline-panel">

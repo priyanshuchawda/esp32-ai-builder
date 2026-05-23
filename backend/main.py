@@ -4,10 +4,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.csi_demo_simulator import SCENARIOS, build_demo_snapshot
+from backend.csi_power_summary import build_power_summary
+from backend.esp_live_probe import (
+    build_probe_lines,
+    detect_local_ip,
+    load_firmware_network_config,
+    run_udp_probe,
+    summarize_target_ip,
+)
 
 
 app = FastAPI(title="ESP32 Wi-Fi CSI Spatial Intelligence")
@@ -83,6 +91,98 @@ def judge_demo(scenario: str = "occupied_still") -> dict:
         "pipeline": PIPELINE,
         "capabilities": CAPABILITIES,
     }
+
+
+@app.get("/api/judge-live")
+def judge_live(
+    duration: int = Query(default=3, ge=1, le=15),
+    bind_ip: str = "0.0.0.0",
+    udp_port: int = Query(default=5005, ge=1, le=65535),
+    min_fps: float = Query(default=5.0, ge=0.1, le=100.0),
+) -> dict:
+    """Run a short real UDP CSI probe and return dashboard-ready live data."""
+
+    try:
+        udp_summary, quality_summary, modes, occupancy, fingerprint = run_udp_probe(
+            bind_ip=bind_ip,
+            udp_port=udp_port,
+            duration_sec=duration,
+            min_fps=min_fps,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Live probe failed: {type(exc).__name__}") from exc
+
+    firmware_config = load_firmware_network_config()
+    config_summary = summarize_target_ip(
+        target_ip=firmware_config.get("target_ip"),
+        local_ip=detect_local_ip(),
+        target_port=firmware_config.get("target_port"),
+    )
+    lines = build_probe_lines(
+        issue=73,
+        duration_sec=duration,
+        config_summary=config_summary,
+        udp_summary=udp_summary,
+        quality_summary=quality_summary,
+        modes=modes,
+        fingerprint=fingerprint,
+        occupancy=occupancy,
+    )
+    overall_status = _line_value(lines[0], "status") or "UNKNOWN"
+    next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
+    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint)
+
+    return {
+        "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": "actual_udp_probe",
+        "duration_sec": duration,
+        "overall_status": overall_status,
+        "udp": udp_summary,
+        "quality": quality_summary,
+        "modes": {str(mode): count for mode, count in modes.items()},
+        "config": config_summary,
+        "occupancy": occupancy,
+        "fingerprint": fingerprint,
+        "snapshot": snapshot,
+        "next_actions": next_actions,
+        "lines": lines,
+    }
+
+
+def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: dict) -> dict:
+    trusted = bool(occupancy.get("trusted"))
+    occupied = occupancy.get("class") == "OCCUPIED"
+    telemetry = {
+        "presence": occupied,
+        "resp_bpm": 0.0,
+        "heart_bpm": 0.0,
+        "fall_detected": False,
+        "variance": round(float(fingerprint.get("spread", 0.0)), 2),
+        "motion": {
+            "display_level": "STILL" if trusted and occupied else "UNSTABLE",
+            "score": 0.0,
+            "trusted": trusted,
+        },
+        "occupancy": occupancy,
+    }
+    return {
+        "scenario": "live_probe",
+        "source": "actual_udp_probe",
+        "note": "Fresh UDP CSI probe from the ESP32 stream.",
+        "telemetry": telemetry,
+        "quality": quality_summary,
+        "summary": build_power_summary(telemetry, quality_summary),
+        "fingerprint": fingerprint,
+    }
+
+
+def _line_value(line: str, key: str) -> str | None:
+    prefix = f"{key}="
+    for part in line.split():
+        if part.startswith(prefix):
+            return part.removeprefix(prefix)
+    return None
 
 
 def main() -> None:

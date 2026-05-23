@@ -321,6 +321,31 @@
   line-height: 1.45;
 }
 
+.muted.error {
+  color: var(--danger);
+}
+
+.probe-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.probe-button:disabled {
+  cursor: wait;
+  opacity: 0.76;
+}
+
 .pipeline-panel {
   grid-column: span 2;
 }
@@ -438,6 +463,10 @@
     padding: 0 8px;
     font-size: 12px;
     margin-left: auto;
+  }
+
+  .probe-button {
+    width: 100%;
   }
 
   .scenario-rail,
