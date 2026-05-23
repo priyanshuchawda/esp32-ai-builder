@@ -42,6 +42,7 @@ class SignalQualityMonitor:
         dominant_subcarrier_ratio = dominant_subcarrier_count / len(self.samples)
         sequence_gaps = sum(1 for prev, cur in zip(seqs, seqs[1:]) if cur != prev + 1)
         rssi_spread = max(rssis) - min(rssis)
+        rssi_robust_spread = self._percentile_spread(rssis)
 
         reasons = []
         status = "GOOD"
@@ -63,10 +64,12 @@ class SignalQualityMonitor:
                 status = "BAD"
             elif status != "BAD":
                 status = "WEAK"
-        if rssi_spread > 30:
+        if rssi_robust_spread > 30:
             reasons.append("rssi_unstable")
             if status != "BAD":
                 status = "WEAK"
+        elif rssi_spread > 30:
+            reasons.append("rssi_outliers")
         if len(subcarrier_modes) > 1 and dominant_subcarrier_ratio < 0.9:
             reasons.append("mixed_subcarriers")
             if status != "BAD":
@@ -81,6 +84,7 @@ class SignalQualityMonitor:
             "rssi_min": min(rssis),
             "rssi_max": max(rssis),
             "rssi_spread": rssi_spread,
+            "rssi_robust_spread": round(rssi_robust_spread, 2),
             "subcarrier_modes": subcarrier_modes,
             "dominant_subcarriers": dominant_subcarriers,
             "dominant_subcarrier_ratio": round(dominant_subcarrier_ratio, 3),
@@ -102,8 +106,20 @@ class SignalQualityMonitor:
             "rssi_min": 0,
             "rssi_max": 0,
             "rssi_spread": 0,
+            "rssi_robust_spread": 0.0,
             "subcarrier_modes": {},
             "dominant_subcarriers": 0,
             "dominant_subcarrier_ratio": 0.0,
             "reasons": reasons,
         }
+
+    def _percentile_spread(self, values):
+        if not values:
+            return 0.0
+        if len(values) < 20:
+            return max(values) - min(values)
+
+        ordered = sorted(values)
+        low_index = int((len(ordered) - 1) * 0.05)
+        high_index = int((len(ordered) - 1) * 0.95)
+        return ordered[high_index] - ordered[low_index]
