@@ -15,6 +15,7 @@ from backend.csi_confidence import evaluate_presence_confidence
 from backend.csi_filters import StreamingHampelFilter
 from backend.csi_motion import MotionLevelEstimator, gate_motion_for_quality
 from backend.csi_quality import SignalQualityMonitor
+from backend.csi_power_summary import build_power_summary
 from backend.csi_recommendations import build_signal_recommendations
 from backend.csi_subcarriers import SubcarrierSelector
 from backend.live_label_evaluator import evaluate_live_labels
@@ -1803,6 +1804,38 @@ def draw_sleep_apnea(telemetry, container):
     container.markdown(html, unsafe_allow_html=True)
 
 
+def draw_power_summary(stats, telemetry, container):
+    summary = build_power_summary(telemetry, stats.get("signal_quality", {}))
+    capabilities = ", ".join(summary.get("capabilities", [])) or "none"
+    next_actions = ", ".join(summary.get("next_actions", [])) or "none"
+    confidence_color = {
+        "HIGH": "#33ff33",
+        "MEDIUM": "#ffeb3b",
+        "LOW": "#ff5555",
+    }.get(summary.get("confidence"), "#6a737d")
+    html = f"""
+    <div class='terminal-container' style='border: 1px solid #1b2028; border-radius: 8px; padding: 18px; background-color: #0c0f13; margin-bottom: 15px;'>
+        <div style='color: #8892b0; font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 14px; font-weight: bold;'>CSI POWER SUMMARY</div>
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.82rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Demo State</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{html_lib.escape(str(summary.get("demo_state", "UNKNOWN")))}</span>
+        </div>
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.82rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Confidence</span>
+            <span style='font-weight: bold; color: {confidence_color}; font-family: monospace;'>{html_lib.escape(str(summary.get("confidence", "LOW")))}</span>
+        </div>
+        <div style='border-top: 1px solid #1b2028; padding-top: 10px; margin-top: 8px; color: #e6f1ff; font-family: monospace; font-size: 0.84rem; font-weight: bold;'>
+            {html_lib.escape(str(summary.get("headline", "CSI demo state available")))}
+        </div>
+        <div style='margin-top: 10px; color: #8892b0; font-family: monospace; font-size: 0.76rem;'>Capabilities</div>
+        <div style='color: #33ff33; font-family: monospace; font-size: 0.78rem; word-break: break-word;'>{html_lib.escape(capabilities)}</div>
+        <div style='margin-top: 10px; color: #8892b0; font-family: monospace; font-size: 0.76rem;'>Next Action</div>
+        <div style='color: #ffeb3b; font-family: monospace; font-size: 0.76rem; word-break: break-word;'>{html_lib.escape(next_actions)}</div>
+    </div>
+    """
+    container.markdown(html, unsafe_allow_html=True)
+
+
 def draw_wifi_signal(stats, telemetry, raw_hist, container):
     rssi = stats.get("rssi", -95)
     variance = telemetry.get("variance", 0.0)
@@ -2205,6 +2238,7 @@ def render_dashboard(is_running, source_mode):
         draw_indicators_and_keys(telemetry, st)
 
     with col_right:
+        draw_power_summary(stats, telemetry, st)
         draw_wifi_signal(stats, telemetry, raw_hist, st)
         draw_presence(telemetry, st)
         draw_apnea_events(telemetry, st)

@@ -1,5 +1,6 @@
 import unittest
 from frontend.app import (
+    draw_power_summary,
     draw_vital_signs,
     draw_sleep_apnea,
     draw_wifi_signal,
@@ -30,6 +31,26 @@ class MockStreamlitContainer:
 
 
 class TestDashboardIntegrity(unittest.TestCase):
+    def test_draw_power_summary(self):
+        container = MockStreamlitContainer()
+        telemetry = {
+            "presence": True,
+            "resp_bpm": 15.2,
+            "heart_bpm": 73.5,
+            "fall_detected": False,
+            "motion": {"display_level": "STILL", "score": 0.11, "trusted": True},
+            "occupancy": {"class": "OCCUPIED", "trusted": True, "reasons": []},
+        }
+        stats = {"signal_quality": {"status": "GOOD", "fps": 25.0, "reasons": []}}
+
+        draw_power_summary(stats, telemetry, container)
+
+        html = container.markdown_calls[0][0]
+        self.assertIn("CSI POWER SUMMARY", html)
+        self.assertIn("OCCUPIED_STILL", html)
+        self.assertIn("Human presence visible through Wi-Fi CSI", html)
+        self.assertIn("presence, breathing, heart_rate", html)
+
     def test_draw_vital_signs_absent(self):
         container = MockStreamlitContainer()
         telemetry = {
