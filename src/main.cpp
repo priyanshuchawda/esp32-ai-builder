@@ -1,6 +1,9 @@
 #include <Arduino.h>
-#include <math.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include "esp_wifi.h"
 
+// Check if credentials file exists, otherwise use defaults
 #if __has_include("wifi_credentials.h")
 #include "wifi_credentials.h"
 #define HAS_WIFI_CREDENTIALS 1
@@ -8,19 +11,39 @@
 #define HAS_WIFI_CREDENTIALS 0
 #endif
 
-#if HAS_WIFI_CREDENTIALS
-#include <WiFi.h>
-#include "esp_wifi.h"
+// Fallback configuration if wifi_credentials.h is not found or missing defines
+#ifndef WIFI_SSID
+#define WIFI_SSID "your_wifi_ssid"
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "your_wifi_password"
+#endif
+#ifndef TARGET_IP
+#define TARGET_IP "192.168.1.100"
+#endif
+#ifndef TARGET_PORT
+#define TARGET_PORT 5005
+#endif
+#ifndef NODE_ID
+#define NODE_ID 1
 #endif
 
 namespace {
 constexpr uint32_t kBaudRate = 115200;
-constexpr uint32_t kSampleIntervalMs = 100;
-constexpr uint32_t kWifiConnectTimeoutMs = 15000;
-constexpr uint32_t kRealCsiFirstFrameTimeoutMs = 10000;
-constexpr int kStatusLedPin = 2;
-constexpr int kCsiBins = 6;
+constexpr int kStatusLedPin = 2; // Onboard LED for DevKit V1
+constexpr int kCsiBins = 6;      // For serial CSV fallback (compatible with old engine)
 
+// UDP target settings
+const char* kTargetIp = TARGET_IP;
+const uint16_t kTargetPort = TARGET_PORT;
+const uint8_t kNodeId = NODE_ID;
+
+WiFiUDP g_udp;
+uint32_t g_sequence = 0;
+unsigned long g_lastProcessMs = 0;
+constexpr unsigned long kMinProcessIntervalMs = 20; // 50 Hz max sample rate to prevent network/CPU overload
+
+// Latest sample statistics for serial output
 struct CsiSample {
   int64_t timestampMs;
   int rssi;
@@ -29,67 +52,87 @@ struct CsiSample {
 };
 
 volatile bool g_hasRealCsi = false;
-bool g_useSimulatedFallback = false;
 CsiSample g_latestSample = {};
 portMUX_TYPE g_sampleMux = portMUX_INITIALIZER_UNLOCKED;
-
-float randomFloat(float minValue, float maxValue) {
-  const float unit = static_cast<float>(esp_random()) /
-                     static_cast<float>(UINT32_MAX);
-  return minValue + unit * (maxValue - minValue);
-}
-
-int clampCsi(float value) {
-  if (value < 1.0f) {
-    return 1;
-  }
-  return static_cast<int>(roundf(value));
-}
-
-void printCsvSample(const CsiSample &sample) {
-  Serial.printf("%lld,%d,%d,%d,%d,%d,%d,%d\n",
-                sample.timestampMs,
-                sample.rssi,
-                sample.bins[0],
-                sample.bins[1],
-                sample.bins[2],
-                sample.bins[3],
-                sample.bins[4],
-                sample.bins[5]);
-}
 
 void printStatus(const char *message) {
   Serial.print("# ");
   Serial.println(message);
 }
 
-void printSimulatedSample() {
-  static float timeSeconds = 0.0f;
-
-  const float baseline = 20.0f + 5.0f * sinf(2.0f * PI * 0.05f * timeSeconds);
-  const float noise = randomFloat(-1.5f, 1.5f);
-  const bool hasSpike = (esp_random() % 100U) < 5U;
-  const float spike = hasSpike ? ((esp_random() % 2U) == 0U ? 30.0f : -25.0f) : 0.0f;
-  const float signal = baseline + noise + spike;
-
-  CsiSample sample = {};
-  sample.timestampMs = static_cast<int64_t>(millis());
-  sample.rssi = -50 + static_cast<int>(0.2f * signal) +
-                static_cast<int>(esp_random() % 3U) - 1;
-  for (int i = 0; i < kCsiBins; ++i) {
-    sample.bins[i] = clampCsi(signal + randomFloat(-2.0f, 2.0f));
+// Function to construct and send ADR-018 binary packet over UDP
+void sendCsiUdp(wifi_csi_info_t *data) {
+  if (data == nullptr || data->buf == nullptr || data->len == 0) {
+    return;
   }
 
-  printCsvSample(sample);
-  timeSeconds += static_cast<float>(kSampleIntervalMs) / 1000.0f;
+  uint8_t n_antennas = 1;
+  uint16_t iq_len = data->len;
+  uint16_t n_subcarriers = iq_len / 2; // 1 byte I, 1 byte Q per subcarrier
+
+  // Derive frequency from channel number
+  uint8_t channel = data->rx_ctrl.channel;
+  uint32_t freq_mhz = 0;
+  if (channel >= 1 && channel <= 13) {
+    freq_mhz = 2412 + (channel - 1) * 5;
+  } else if (channel == 14) {
+    freq_mhz = 2484;
+  }
+
+  // Build the 20-byte ADR-018 header
+  // Structure:
+  // [0..3]   Magic: 0xC5110001 (LE u32)
+  // [4]      Node ID (u8)
+  // [5]      Antennas (u8)
+  // [6..7]   Number of subcarriers (LE u16)
+  // [8..11]  Frequency MHz (LE u32)
+  // [12..15] Sequence number (LE u32)
+  // [16]     RSSI (i8)
+  // [17]     Noise floor (i8)
+  // [18..19] Reserved (LE u16)
+  uint8_t header[20];
+  uint32_t magic = 0xC5110001;
+  
+  memcpy(&header[0], &magic, 4);
+  header[4] = kNodeId;
+  header[5] = n_antennas;
+  memcpy(&header[6], &n_subcarriers, 2);
+  memcpy(&header[8], &freq_mhz, 4);
+  
+  portENTER_CRITICAL_ISR(&g_sampleMux);
+  uint32_t seq = g_sequence++;
+  portEXIT_CRITICAL_ISR(&g_sampleMux);
+  
+  memcpy(&header[12], &seq, 4);
+  header[16] = (uint8_t)data->rx_ctrl.rssi;
+  header[17] = (uint8_t)data->rx_ctrl.noise_floor;
+  header[18] = 0;
+  header[19] = 0;
+
+  // Stream packet via UDP
+  g_udp.beginPacket(kTargetIp, kTargetPort);
+  g_udp.write(header, sizeof(header));
+  g_udp.write((const uint8_t*)data->buf, iq_len);
+  g_udp.endPacket();
 }
 
-#if HAS_WIFI_CREDENTIALS
+// WiFi CSI Callback
 void csiCallback(void *, wifi_csi_info_t *data) {
   if (data == nullptr || data->buf == nullptr || data->len < 2) {
     return;
   }
 
+  // Rate limiter (50 Hz maximum)
+  unsigned long now = millis();
+  if (now - g_lastProcessMs < kMinProcessIntervalMs) {
+    return;
+  }
+  g_lastProcessMs = now;
+
+  // 1. Send the binary packet over UDP
+  sendCsiUdp(data);
+
+  // 2. Process for local Serial CSV output
   int accum[kCsiBins] = {0};
   int counts[kCsiBins] = {0};
   const int pairCount = data->len / 2;
@@ -104,35 +147,38 @@ void csiCallback(void *, wifi_csi_info_t *data) {
   }
 
   CsiSample sample = {};
-  sample.timestampMs = static_cast<int64_t>(millis());
+  sample.timestampMs = static_cast<int64_t>(now);
   sample.rssi = data->rx_ctrl.rssi;
   for (int i = 0; i < kCsiBins; ++i) {
     sample.bins[i] = counts[i] > 0 ? max(1, accum[i] / counts[i]) : 1;
   }
 
   portENTER_CRITICAL_ISR(&g_sampleMux);
-  sample.sequence = g_latestSample.sequence + 1;
+  sample.sequence = g_sequence; // synced sequence
   g_latestSample = sample;
   g_hasRealCsi = true;
   portEXIT_CRITICAL_ISR(&g_sampleMux);
 }
 
 bool startRealCsiCapture() {
-  printStatus("REAL_CSI_WIFI_CONNECTING");
+  printStatus("WIFI_CONNECTING");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   const uint32_t startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < kWifiConnectTimeoutMs) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < 15000) {
     delay(250);
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    printStatus("REAL_CSI_WIFI_CONNECT_FAILED_SIMULATED_FALLBACK");
+    printStatus("WIFI_CONNECT_FAILED");
     return false;
   }
-  printStatus("REAL_CSI_WIFI_CONNECTED");
+  
+  Serial.printf("# WIFI_CONNECTED IP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("# STREAMING UDP TO %s:%d (Node: %u)\n", kTargetIp, kTargetPort, kNodeId);
 
+  // Enable promiscuous mode to receive callbacks on all packets
   wifi_csi_config_t csiConfig = {};
   csiConfig.lltf_en = true;
   csiConfig.htltf_en = true;
@@ -143,62 +189,65 @@ bool startRealCsiCapture() {
   csiConfig.shift = 0;
 
   if (esp_wifi_set_csi_rx_cb(csiCallback, nullptr) != ESP_OK) {
-    printStatus("REAL_CSI_CALLBACK_FAILED_SIMULATED_FALLBACK");
+    printStatus("REAL_CSI_CALLBACK_FAILED");
     return false;
   }
   if (esp_wifi_set_csi_config(&csiConfig) != ESP_OK) {
-    printStatus("REAL_CSI_CONFIG_FAILED_SIMULATED_FALLBACK");
+    printStatus("REAL_CSI_CONFIG_FAILED");
     return false;
   }
   if (esp_wifi_set_promiscuous(true) != ESP_OK) {
-    printStatus("REAL_CSI_PROMISCUOUS_FAILED_SIMULATED_FALLBACK");
+    printStatus("REAL_CSI_PROMISCUOUS_FAILED");
     return false;
   }
+  
+  // Set promiscuous filter to only receive MGMT frames (beacon/probes) to avoid core panics
+  wifi_promiscuous_filter_t filt = {
+      .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
+  };
+  if (esp_wifi_set_promiscuous_filter(&filt) != ESP_OK) {
+    printStatus("PROMISCUOUS_FILTER_FAILED");
+  }
+
   if (esp_wifi_set_csi(true) != ESP_OK) {
-    printStatus("REAL_CSI_ENABLE_FAILED_SIMULATED_FALLBACK");
+    printStatus("REAL_CSI_ENABLE_FAILED");
     return false;
   }
 
-  printStatus("REAL_CSI_ENABLED_WAITING_FOR_FRAMES");
+  printStatus("REAL_CSI_ENABLED_STREAMING");
   return true;
 }
-#endif
-}  // namespace
+} // namespace
 
 void setup() {
   Serial.begin(kBaudRate);
   pinMode(kStatusLedPin, OUTPUT);
-  delay(500);
+  delay(1000);
 
-#if HAS_WIFI_CREDENTIALS
+  printStatus("STARTING_ESP32_CSI_NODE");
+
   if (!startRealCsiCapture()) {
-    g_useSimulatedFallback = true;
+    printStatus("RUNNING_WITHOUT_WIFI_CSI");
   }
-#else
-  printStatus("WIFI_CREDENTIALS_ABSENT_SIMULATED_FALLBACK");
-#endif
 }
 
 void loop() {
   static bool ledState = false;
   static uint32_t lastPrintedSequence = 0;
 
-#if HAS_WIFI_CREDENTIALS
-  static uint32_t firstFrameWaitStartMs = millis();
-  if (!g_useSimulatedFallback && !g_hasRealCsi &&
-      millis() - firstFrameWaitStartMs > kRealCsiFirstFrameTimeoutMs) {
-    printStatus("REAL_CSI_NO_FRAMES_SIMULATED_FALLBACK");
-    g_useSimulatedFallback = true;
-  }
-
-  if (g_useSimulatedFallback) {
-    printSimulatedSample();
-    delay(kSampleIntervalMs);
-    ledState = !ledState;
-    digitalWrite(kStatusLedPin, ledState ? HIGH : LOW);
+  // If WiFi drops, try to reconnect
+  if (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(kStatusLedPin, LOW);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    delay(2000);
     return;
   }
 
+  // Toggle status LED to show activity
+  ledState = !ledState;
+  digitalWrite(kStatusLedPin, ledState ? HIGH : LOW);
+
+  // Serial CSV print loop
   CsiSample sample = {};
   bool hasNewRealSample = false;
   portENTER_CRITICAL(&g_sampleMux);
@@ -210,15 +259,17 @@ void loop() {
   portEXIT_CRITICAL(&g_sampleMux);
 
   if (hasNewRealSample) {
-    printCsvSample(sample);
-  } else {
-    delay(10);
+    // timestamp, rssi, csi_0..5
+    Serial.printf("%lld,%d,%d,%d,%d,%d,%d,%d\n",
+                  sample.timestampMs,
+                  sample.rssi,
+                  sample.bins[0],
+                  sample.bins[1],
+                  sample.bins[2],
+                  sample.bins[3],
+                  sample.bins[4],
+                  sample.bins[5]);
   }
-#else
-  printSimulatedSample();
-  delay(kSampleIntervalMs);
-#endif
 
-  ledState = !ledState;
-  digitalWrite(kStatusLedPin, ledState ? HIGH : LOW);
+  delay(20);
 }
