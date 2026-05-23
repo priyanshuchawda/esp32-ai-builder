@@ -7,6 +7,7 @@ def classify_occupancy(telemetry, signal_quality, evaluator_report):
 
     reasons = []
     quality_status = str(signal_quality.get("status", "BAD")).upper()
+    quality_usable = _quality_supports_occupancy(quality_status, signal_quality.get("reasons", []))
     if quality_status == "BAD":
         reasons.append("signal_quality_bad")
 
@@ -18,8 +19,11 @@ def classify_occupancy(telemetry, signal_quality, evaluator_report):
     value = _feature_value(telemetry, feature)
 
     would_be_occupied = value > threshold
-    if quality_status == "WEAK" and not would_be_occupied:
-        reasons.append("weak_signal_cannot_confirm_empty")
+    if not quality_usable and quality_status == "WEAK":
+        if would_be_occupied:
+            reasons.append("signal_quality_weak_blocked")
+        else:
+            reasons.append("weak_signal_cannot_confirm_empty")
 
     if reasons:
         occupancy_class = "UNKNOWN"
@@ -45,3 +49,13 @@ def _feature_value(telemetry, feature):
     if feature == "filtered_variance":
         return float(telemetry.get("variance", 0.0) or 0.0)
     return float(telemetry.get(feature, 0.0) or 0.0)
+
+
+def _quality_supports_occupancy(quality_status, quality_reasons):
+    if quality_status == "GOOD":
+        return True
+    if quality_status != "WEAK":
+        return False
+
+    tolerated_reasons = {"rssi_outliers"}
+    return set(quality_reasons or []).issubset(tolerated_reasons)
