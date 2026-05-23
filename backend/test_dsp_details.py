@@ -118,5 +118,15 @@ class TestDSPDetails(unittest.TestCase):
             from scipy.signal import butter
             app.HAS_SCIPY = True
 
+    def test_add_sample_filters_large_spikes_before_presence_history(self):
+        dsp = RuViewDSP(fps=25.0)
+
+        for _ in range(9):
+            dsp.add_sample(25.0)
+        dsp.add_sample(90.0)
+
+        self.assertEqual(dsp.raw_history[-1], 25.0)
+        self.assertEqual(dsp.spike_filter.replaced_count, 1)
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 
 from backend.csi_calibration import PresenceCalibration
 from backend.csi_confidence import evaluate_presence_confidence
+from backend.csi_filters import StreamingHampelFilter
 from backend.csi_quality import SignalQualityMonitor
 from backend.csi_recommendations import build_signal_recommendations
 from backend.csi_subcarriers import SubcarrierSelector
@@ -409,6 +410,7 @@ class RuViewDSP:
         self.apnea_detector = ApneaDetector()
         self.last_apnea_check_time = 0.0
         self.presence_calibration = PresenceCalibration(active=False)
+        self.spike_filter = StreamingHampelFilter(window_size=9, threshold=3.0, min_spike_delta=5.0)
         
         # Filter coefficients cache to avoid calling scipy.signal.butter on every sample
         self._filter_cache = {}
@@ -426,17 +428,18 @@ class RuViewDSP:
         return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
-        self.raw_history.append(raw_val)
+        clean_val = self.spike_filter.update(raw_val)
+        self.raw_history.append(clean_val)
         if self.presence_calibration.active:
-            self.presence_calibration.add_sample(raw_val)
+            self.presence_calibration.add_sample(clean_val)
         
         # 1. Apply EMA Lowpass Denoising (Alpha = 0.2)
         alpha = 0.2
         if len(self.filtered_history) > 0:
             prev = self.filtered_history[-1]
-            filtered = alpha * raw_val + (1 - alpha) * prev
+            filtered = alpha * clean_val + (1 - alpha) * prev
         else:
-            filtered = raw_val
+            filtered = clean_val
         self.filtered_history.append(filtered)
         
         # 2. Extract Respiration Band (0.1 - 0.5 Hz)
@@ -498,6 +501,7 @@ class RuViewDSP:
                 "rep_count": 0,
                 "effective_presence_threshold": effective_presence_threshold,
                 "calibration": calibration_summary,
+                "spikes_filtered": self.spike_filter.replaced_count,
                 "apnea_status": {
                     "is_apnea": False,
                     "is_hypopnea": False,
@@ -597,6 +601,7 @@ class RuViewDSP:
             "rep_count": self.rep_count,
             "effective_presence_threshold": effective_presence_threshold,
             "calibration": self.presence_calibration.summary(),
+            "spikes_filtered": self.spike_filter.replaced_count,
             "apnea_status": {
                 "is_apnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "apnea",
                 "is_hypopnea": self.apnea_detector.current_event is not None and self.apnea_detector.current_event["type"] == "hypopnea",
@@ -1777,6 +1782,7 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     rssi = stats.get("rssi", -95)
     variance = telemetry.get("variance", 0.0)
     presence = telemetry.get("presence", False)
+    spikes_filtered = int(telemetry.get("spikes_filtered", 0))
     signal_quality = stats.get("signal_quality", {})
     quality_status = signal_quality.get("status", "BAD")
     quality_reasons = signal_quality.get("reasons", [])
@@ -1878,6 +1884,11 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
             <span style='color: #8892b0; font-family: monospace;'>Motion</span>
             <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{motion_val:.3f}</span>
+        </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Spikes Filtered</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{spikes_filtered}</span>
         </div>
         
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>

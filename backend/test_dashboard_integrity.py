@@ -130,6 +130,7 @@ class TestDashboardIntegrity(unittest.TestCase):
         telemetry = {
             "presence": True,
             "variance": 1.45,
+            "spikes_filtered": 2,
             "presence_confidence": {
                 "score": 95,
                 "level": "HIGH",
@@ -143,6 +144,8 @@ class TestDashboardIntegrity(unittest.TestCase):
         html = container.markdown_calls[0][0]
         self.assertIn("-45 dBm", html)
         self.assertIn("4, 8, 12", html)
+        self.assertIn("Spikes Filtered", html)
+        self.assertIn(">2</span>", html)
         self.assertIn("1.45", html)
         self.assertIn("svg", html)
 
