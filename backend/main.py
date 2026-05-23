@@ -18,6 +18,7 @@ from backend.esp_live_probe import (
     run_udp_probe,
     summarize_target_ip,
 )
+from backend.material_change import MaterialChangeTracker, build_demo_material_change, fingerprint_to_amplitudes
 from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
 
 
@@ -66,11 +67,13 @@ CAPABILITIES = [
     "walking motion",
     "fall-event simulation",
     "CSI fingerprint",
+    "material change watch",
     "quality gating",
     "Telegram alert path",
 ]
 
 LIVE_ROOM_TRACKER = OnlineRoomStateTracker()
+LIVE_MATERIAL_TRACKER = MaterialChangeTracker(baseline_frames=4)
 
 
 @app.get("/api/judge-demo")
@@ -191,12 +194,21 @@ def _build_live_snapshot(
         "spectrogram": spectrogram,
     }
     snapshot["room_state"] = LIVE_ROOM_TRACKER.observe(snapshot)
+    material_change = LIVE_MATERIAL_TRACKER.observe(fingerprint_to_amplitudes(fingerprint))
+    material_change["trusted"] = snapshot_quality.get("status") == "GOOD"
+    material_change["trust_reason"] = "quality_good" if material_change["trusted"] else "signal_quality_not_good"
+    snapshot["material_change"] = material_change
     return snapshot
 
 
 def _with_room_state(snapshot: dict) -> dict:
     snapshot["room_state"] = build_room_state(snapshot)
     snapshot["spectrogram"] = build_demo_spectrogram(snapshot)
+    snapshot["material_change"] = build_demo_material_change(snapshot)
+    snapshot["material_change"]["trusted"] = snapshot.get("quality", {}).get("status") == "GOOD"
+    snapshot["material_change"]["trust_reason"] = (
+        "quality_good" if snapshot["material_change"]["trusted"] else "signal_quality_not_good"
+    )
     return snapshot
 
 

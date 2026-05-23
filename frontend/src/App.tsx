@@ -75,6 +75,20 @@ type Spectrogram = {
   ascii: string
 }
 
+type MaterialChange = {
+  baseline_ready: boolean
+  trusted?: boolean
+  trust_reason?: string
+  samples: number
+  change_detected: boolean
+  event_type: string
+  material_hint: string
+  changed_bins: number
+  new_nulls: number
+  removed_nulls: number
+  null_map: string
+}
+
 type ScenarioSnapshot = {
   scenario: string
   telemetry: Telemetry
@@ -83,6 +97,7 @@ type ScenarioSnapshot = {
   fingerprint: Fingerprint
   room_state?: RoomState
   spectrogram?: Spectrogram
+  material_change?: MaterialChange
   source?: string
   note?: string
 }
@@ -331,6 +346,8 @@ function App() {
   const live = liveProbe?.snapshot ?? payload.live
   const roomState = selected.room_state
   const liveRoomState = live.room_state
+  const materialChange = selected.material_change
+  const liveMaterialChange = live.material_change
   const selectedValues = useMemo(
     () => fingerprintValues(selected.fingerprint.bars),
     [selected.fingerprint.bars],
@@ -403,6 +420,7 @@ function App() {
               <code>{roomState.timeline || String(roomState.cluster_id)}</code>
             </div>
           ) : null}
+          {materialChange ? <MaterialChangeStrip materialChange={materialChange} /> : null}
           <div className="metric-grid">
             <Metric icon={<UserRound size={18} />} label="Occupancy" value={selected.telemetry.occupancy.class} />
             <Metric icon={<Activity size={18} />} label="Motion" value={selected.telemetry.motion.display_level} />
@@ -469,8 +487,14 @@ function App() {
             <Metric icon={<Zap size={18} />} label="Packets" value={liveProbe ? String(liveProbe.udp.packets) : '--'} />
             <Metric
               icon={<AlertTriangle size={18} />}
-              label="Room state"
-              value={liveRoomState?.label ?? (live.source ?? 'live').replaceAll('_', ' ')}
+              label="Material"
+              value={
+                liveMaterialChange?.baseline_ready
+                  ? liveMaterialChange.trusted === false
+                    ? 'untrusted signal'
+                    : liveMaterialChange.material_hint
+                  : liveRoomState?.label ?? (live.source ?? 'live').replaceAll('_', ' ')
+              }
             />
           </div>
           <p className={`muted ${liveProbeStatus === 'error' ? 'error' : ''}`}>
@@ -520,6 +544,29 @@ function App() {
         </article>
       </section>
     </main>
+  )
+}
+
+function MaterialChangeStrip({ materialChange }: { materialChange: MaterialChange }) {
+  const label = !materialChange.baseline_ready
+    ? 'learning'
+    : materialChange.change_detected
+      ? materialChange.event_type
+      : 'stable'
+  const detail = materialChange.trusted === false ? 'untrusted signal' : materialChange.material_hint
+
+  return (
+    <div className={`material-strip ${materialChange.change_detected ? 'changed' : ''}`}>
+      <span>
+        <strong>{label}</strong>
+        {detail}
+      </span>
+      <span>
+        <strong>{materialChange.changed_bins}</strong>
+        bins changed
+      </span>
+      <code>{materialChange.null_map}</code>
+    </div>
   )
 }
 

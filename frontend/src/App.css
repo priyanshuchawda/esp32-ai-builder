@@ -198,6 +198,45 @@
   letter-spacing: 0;
 }
 
+.material-strip {
+  display: grid;
+  grid-template-columns: 1fr 0.75fr auto;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.material-strip span,
+.material-strip code {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.material-strip.changed span,
+.material-strip.changed code {
+  border-color: rgba(245, 158, 11, 0.38);
+  color: var(--warn);
+}
+
+.material-strip strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.material-strip code {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warn);
+  letter-spacing: 0;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -549,6 +588,7 @@
   .pipeline,
   .capability-grid,
   .room-state-strip,
+  .material-strip,
   .metric-grid {
     grid-template-columns: 1fr;
   }

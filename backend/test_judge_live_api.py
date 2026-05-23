@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend.main import LIVE_MATERIAL_TRACKER, app
 
 
 def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
@@ -47,3 +47,11 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["snapshot"]["room_state"]["label"]
     assert data["snapshot"]["fingerprint"]["bars"].isascii()
     assert data["snapshot"]["spectrogram"]["source"] == "live_udp_frames"
+    assert "baseline_ready" in data["snapshot"]["material_change"]
+    assert data["snapshot"]["material_change"]["samples"] >= 1
+    assert data["snapshot"]["material_change"]["trusted"] is True
+    assert data["snapshot"]["material_change"]["trust_reason"] == "quality_good"
+
+
+def test_judge_live_material_tracker_uses_short_dashboard_baseline():
+    assert LIVE_MATERIAL_TRACKER.baseline_frames == 4
