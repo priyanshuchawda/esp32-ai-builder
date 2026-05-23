@@ -23,12 +23,14 @@ from rich.text import Text
 try:
     from backend.csi_calibration import PresenceCalibration
     from backend.csi_confidence import evaluate_presence_confidence
+    from backend.csi_filters import StreamingHampelFilter
     from backend.csi_quality import SignalQualityMonitor
     from backend.csi_recommendations import build_signal_recommendations
     from backend.csi_subcarriers import SubcarrierSelector
 except ImportError:
     from csi_calibration import PresenceCalibration
     from csi_confidence import evaluate_presence_confidence
+    from csi_filters import StreamingHampelFilter
     from csi_quality import SignalQualityMonitor
     from csi_recommendations import build_signal_recommendations
     from csi_subcarriers import SubcarrierSelector
@@ -58,6 +60,7 @@ class RuViewDSP:
         self.presence_threshold = 0.6
         self.fall_threshold = 12.0
         self.presence_calibration = PresenceCalibration(active=False)
+        self.spike_filter = StreamingHampelFilter(window_size=9, threshold=3.0, min_spike_delta=5.0)
         
         # Debouncing/cooldowns
         self.last_fall_time = 0.0
@@ -85,17 +88,18 @@ class RuViewDSP:
         return self.presence_calibration.summary()
         
     def add_sample(self, raw_val):
-        self.raw_history.append(raw_val)
+        clean_val = self.spike_filter.update(raw_val)
+        self.raw_history.append(clean_val)
         if self.presence_calibration.active:
-            self.presence_calibration.add_sample(raw_val)
+            self.presence_calibration.add_sample(clean_val)
         
         # 1. Apply EMA Lowpass Denoising (Alpha = 0.2)
         alpha = 0.2
         if len(self.filtered_history) > 0:
             prev = self.filtered_history[-1]
-            filtered = alpha * raw_val + (1 - alpha) * prev
+            filtered = alpha * clean_val + (1 - alpha) * prev
         else:
-            filtered = raw_val
+            filtered = clean_val
         self.filtered_history.append(filtered)
         
         # 2. Extract Respiration Band (0.1 - 0.5 Hz)
@@ -159,6 +163,7 @@ class RuViewDSP:
                 "rep_count": 0,
                 "effective_presence_threshold": effective_presence_threshold,
                 "calibration": calibration_summary,
+                "spikes_filtered": self.spike_filter.replaced_count,
             }
             
         raw_arr = np.array(self.raw_history)
@@ -233,6 +238,7 @@ class RuViewDSP:
             "rep_count": self.rep_count,
             "effective_presence_threshold": effective_presence_threshold,
             "calibration": self.presence_calibration.summary(),
+            "spikes_filtered": self.spike_filter.replaced_count,
         }
         
     def _compute_bpm_zero_crossing(self, signal):
@@ -309,6 +315,7 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
     table.add_row("Confidence Gate:", f"{confidence_score}% {confidence_label}")
     table.add_row("Gate Reason:", confidence_reasons)
+    table.add_row("Spikes Filtered:", str(telemetry.get("spikes_filtered", 0)))
     for item in telemetry.get("recommendations", [])[:2]:
         table.add_row("Next Action:", f"{item.get('title', '')}: {item.get('action', '')}")
     table.add_row("Max Acceleration:", f"{telemetry['acceleration']:.2f}")
