@@ -42,6 +42,11 @@ WiFiUDP g_udp;
 uint32_t g_sequence = 0;
 unsigned long g_lastProcessMs = 0;
 constexpr unsigned long kMinProcessIntervalMs = 20; // 50 Hz max sample rate to prevent network/CPU overload
+constexpr unsigned long kReconnectIntervalMs = 5000;
+constexpr unsigned long kStatusPrintIntervalMs = 5000;
+bool g_csiStreaming = false;
+unsigned long g_lastReconnectAttemptMs = 0;
+unsigned long g_lastStatusPrintMs = 0;
 
 // Latest sample statistics for serial output
 struct CsiSample {
@@ -160,13 +165,13 @@ void csiCallback(void *, wifi_csi_info_t *data) {
   portEXIT_CRITICAL_ISR(&g_sampleMux);
 }
 
-bool startRealCsiCapture() {
+bool connectWifiWithTimeout(uint32_t timeoutMs) {
   printStatus("WIFI_CONNECTING");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   const uint32_t startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < 15000) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startMs < timeoutMs) {
     delay(250);
   }
 
@@ -176,6 +181,10 @@ bool startRealCsiCapture() {
   }
   
   Serial.printf("# WIFI_CONNECTED IP: %s\n", WiFi.localIP().toString().c_str());
+  return true;
+}
+
+bool configureRealCsiCapture() {
   Serial.printf("# STREAMING UDP TO %s:%d (Node: %u)\n", kTargetIp, kTargetPort, kNodeId);
 
   // Enable promiscuous mode to receive callbacks on all packets
@@ -220,6 +229,36 @@ bool startRealCsiCapture() {
   printStatus("REAL_CSI_ENABLED_STREAMING");
   return true;
 }
+
+bool startRealCsiCapture() {
+  if (!connectWifiWithTimeout(15000)) {
+    return false;
+  }
+  return configureRealCsiCapture();
+}
+
+bool ensureWifiConnected() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+
+  g_csiStreaming = false;
+  digitalWrite(kStatusLedPin, LOW);
+
+  const unsigned long now = millis();
+  if (now - g_lastStatusPrintMs >= kStatusPrintIntervalMs) {
+    printStatus("WIFI_DISCONNECTED_RECONNECTING");
+    g_lastStatusPrintMs = now;
+  }
+  if (now - g_lastReconnectAttemptMs >= kReconnectIntervalMs) {
+    WiFi.disconnect(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    g_lastReconnectAttemptMs = now;
+  }
+
+  return false;
+}
 } // namespace
 
 void setup() {
@@ -229,7 +268,8 @@ void setup() {
 
   printStatus("STARTING_ESP32_CSI_NODE");
 
-  if (!startRealCsiCapture()) {
+  g_csiStreaming = startRealCsiCapture();
+  if (!g_csiStreaming) {
     printStatus("RUNNING_WITHOUT_WIFI_CSI");
   }
 }
@@ -238,12 +278,18 @@ void loop() {
   static bool ledState = false;
   static uint32_t lastPrintedSequence = 0;
 
-  // If WiFi drops, try to reconnect
-  if (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(kStatusLedPin, LOW);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    delay(2000);
+  // If WiFi drops, try to reconnect and re-enable CSI after the link returns.
+  if (!ensureWifiConnected()) {
+    delay(200);
     return;
+  }
+  if (!g_csiStreaming) {
+    printStatus("REAL_CSI_REENABLE_ATTEMPT");
+    g_csiStreaming = configureRealCsiCapture();
+    if (!g_csiStreaming) {
+      delay(1000);
+      return;
+    }
   }
 
   // Toggle status LED to show activity
