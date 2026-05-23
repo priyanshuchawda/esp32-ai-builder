@@ -6,12 +6,14 @@ import struct
 import threading
 import time
 import queue
+import html as html_lib
 from collections import deque
 import plotly.graph_objects as go
 
 from backend.csi_calibration import PresenceCalibration
 from backend.csi_confidence import evaluate_presence_confidence
 from backend.csi_quality import SignalQualityMonitor
+from backend.csi_recommendations import build_signal_recommendations
 
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
 try:
@@ -143,9 +145,24 @@ def default_presence_confidence():
     }
 
 
+def default_recommendations():
+    return [
+        {
+            "code": "restore_udp_stream",
+            "title": "Restore CSI packet stream",
+            "action": "Start the ESP32 stream and confirm packets arrive on UDP port 5005.",
+        }
+    ]
+
+
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
+    enriched["recommendations"] = build_signal_recommendations(
+        signal_quality,
+        enriched["presence_confidence"],
+        enriched,
+    )
     return enriched
 
 
@@ -178,6 +195,7 @@ def get_global_resources():
             "threshold": 0.6
         },
         "presence_confidence": default_presence_confidence(),
+        "recommendations": default_recommendations(),
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -1058,6 +1076,7 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
             "threshold": 0.6
         },
         "presence_confidence": default_presence_confidence(),
+        "recommendations": default_recommendations(),
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -1545,6 +1564,7 @@ standby_telemetry = {
         "threshold": 0.6
     },
     "presence_confidence": default_presence_confidence(),
+    "recommendations": default_recommendations(),
     "apnea_status": {
         "is_apnea": False,
         "is_hypopnea": False,
@@ -1751,6 +1771,17 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     confidence = telemetry.get("presence_confidence") or {}
     confidence_label = confidence.get("label", "ROOM EMPTY")
     human_confirmed = is_human_confirmed(telemetry)
+    recommendations = telemetry.get("recommendations", [])[:3]
+    recommendation_rows = ""
+    for item in recommendations:
+        title = html_lib.escape(str(item.get("title", "")))
+        action = html_lib.escape(str(item.get("action", "")))
+        recommendation_rows += f"""
+        <div style='border-top: 1px solid #1b2028; padding-top: 8px; margin-top: 8px; font-size: 0.74rem;'>
+            <div style='color: #ffeb3b; font-family: monospace; font-weight: bold;'>{title}</div>
+            <div style='color: #8892b0; font-family: monospace; margin-top: 3px;'>{action}</div>
+        </div>
+        """
     
     # Motion calculations
     motion_val = variance * 0.05 if presence else (0.002 + np.random.uniform(-0.001, 0.001))
@@ -1835,6 +1866,8 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
             <span style='color: #8892b0; font-family: monospace;'>Gate</span>
             <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{confidence_label}</span>
         </div>
+
+        {recommendation_rows}
         
         {sparkline_svg}
     </div>

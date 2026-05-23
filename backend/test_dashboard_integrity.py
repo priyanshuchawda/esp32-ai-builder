@@ -157,11 +157,19 @@ class TestDashboardIntegrity(unittest.TestCase):
                 "label": "UNCONFIRMED MOTION",
                 "reasons": ["signal_quality_not_good"],
             },
+            "recommendations": [
+                {
+                    "code": "calibrate_empty_room",
+                    "title": "Run empty-room calibration",
+                    "action": "Leave the room empty and calibrate.",
+                }
+            ],
         }
         draw_wifi_signal(stats, telemetry, [24.5, 25.1, 24.8], container)
         html = container.markdown_calls[0][0]
         self.assertIn("0 &nbsp;", html)
         self.assertIn("UNCONFIRMED MOTION", html)
+        self.assertIn("Run empty-room calibration", html)
 
     def test_draw_presence_badge(self):
         # Unconfirmed raw motion

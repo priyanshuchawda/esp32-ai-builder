@@ -24,10 +24,12 @@ try:
     from backend.csi_calibration import PresenceCalibration
     from backend.csi_confidence import evaluate_presence_confidence
     from backend.csi_quality import SignalQualityMonitor
+    from backend.csi_recommendations import build_signal_recommendations
 except ImportError:
     from csi_calibration import PresenceCalibration
     from csi_confidence import evaluate_presence_confidence
     from csi_quality import SignalQualityMonitor
+    from csi_recommendations import build_signal_recommendations
 
 # Try importing scipy for butterworth bandpass filters
 try:
@@ -270,6 +272,11 @@ def draw_ascii_graph(history, width=50, height=8):
 def with_presence_confidence(telemetry, signal_quality):
     enriched = dict(telemetry)
     enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
+    enriched["recommendations"] = build_signal_recommendations(
+        signal_quality,
+        enriched["presence_confidence"],
+        enriched,
+    )
     return enriched
 
 def make_layout(stats, telemetry, dsp):
@@ -300,6 +307,8 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
     table.add_row("Confidence Gate:", f"{confidence_score}% {confidence_label}")
     table.add_row("Gate Reason:", confidence_reasons)
+    for item in telemetry.get("recommendations", [])[:2]:
+        table.add_row("Next Action:", f"{item.get('title', '')}: {item.get('action', '')}")
     table.add_row("Max Acceleration:", f"{telemetry['acceleration']:.2f}")
     table.add_row("Exercise Reps:", f"[bold cyan]{telemetry['rep_count']}[/bold cyan]")
     
