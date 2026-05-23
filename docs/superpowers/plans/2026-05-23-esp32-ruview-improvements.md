@@ -33,6 +33,6 @@
 
 ### Issue #24: Calibrated Confidence Gating
 
-- [ ] Combine calibration status, signal quality, and presence decision into confidence.
-- [ ] Gate Telegram/AI summary wording behind confidence.
-- [ ] Verify low-confidence suppression and high-confidence alert paths.
+- [x] Combine calibration status, signal quality, and presence decision into confidence.
+- [x] Gate Telegram/AI summary wording behind confidence.
+- [x] Verify low-confidence suppression and high-confidence alert paths.

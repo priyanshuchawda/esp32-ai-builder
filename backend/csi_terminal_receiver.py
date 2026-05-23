@@ -22,9 +22,11 @@ from rich.text import Text
 
 try:
     from backend.csi_calibration import PresenceCalibration
+    from backend.csi_confidence import evaluate_presence_confidence
     from backend.csi_quality import SignalQualityMonitor
 except ImportError:
     from csi_calibration import PresenceCalibration
+    from csi_confidence import evaluate_presence_confidence
     from csi_quality import SignalQualityMonitor
 
 # Try importing scipy for butterworth bandpass filters
@@ -264,13 +266,28 @@ def draw_ascii_graph(history, width=50, height=8):
     lines[height - 1] = f"{min_val:6.1f} | {lines[height - 1]}"
     return "\n".join(lines)
 
+
+def with_presence_confidence(telemetry, signal_quality):
+    enriched = dict(telemetry)
+    enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
+    return enriched
+
 def make_layout(stats, telemetry, dsp):
     # Header Panel
     header_text = Text("RuView -- Terminal WiFi Spatial Intelligence", style="bold cyan")
     header_panel = Panel(header_text, border_style="cyan")
     
     # Telemetry Panel
-    presence_str = "[bold green][+] HUMAN PRESENT[/bold green]" if telemetry["presence"] else "[bold grey][-] ROOM EMPTY[/bold grey]"
+    confidence = telemetry.get("presence_confidence", {})
+    confidence_label = confidence.get("label", "ROOM EMPTY")
+    confidence_score = int(confidence.get("score", 0))
+    confidence_reasons = ", ".join(confidence.get("reasons", [])[:2]) or "clear"
+    if confidence.get("alert_allowed", False):
+        presence_str = "[bold green][+] CONFIRMED HUMAN[/bold green]"
+    elif telemetry["presence"]:
+        presence_str = "[bold yellow][~] UNCONFIRMED MOTION[/bold yellow]"
+    else:
+        presence_str = "[bold grey][-] ROOM EMPTY[/bold grey]"
     fall_str = "[blink bold red][!] FALL DETECTED![/blink bold red]" if telemetry["fall_alert"] else "[bold green][+] SAFE (No Fall)[/bold green]"
     
     table = Table(show_header=False, box=None)
@@ -281,6 +298,8 @@ def make_layout(stats, telemetry, dsp):
     table.add_row("Signal Variance:", f"{telemetry['variance']:.4f}")
     table.add_row("Presence Threshold:", f"{telemetry.get('effective_presence_threshold', 0.0):.4f}")
     table.add_row("Calibration:", "READY" if telemetry.get("calibration", {}).get("ready") else "MANUAL")
+    table.add_row("Confidence Gate:", f"{confidence_score}% {confidence_label}")
+    table.add_row("Gate Reason:", confidence_reasons)
     table.add_row("Max Acceleration:", f"{telemetry['acceleration']:.2f}")
     table.add_row("Exercise Reps:", f"[bold cyan]{telemetry['rep_count']}[/bold cyan]")
     
@@ -437,6 +456,7 @@ def main():
                         stats["fps"] = 0.0
                         stats["node_id"] = "Offline (No Signal)"
                         stats["signal_quality"] = quality_monitor.summary(now=now)
+                    telemetry = with_presence_confidence(telemetry, stats.get("signal_quality", {}))
                     live.update(make_layout(stats, telemetry, dsp))
                     last_ui_update = now
                     

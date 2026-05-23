@@ -8,6 +8,15 @@ from frontend.app import (
     draw_indicators_and_keys
 )
 
+
+CONFIRMED = {
+    "score": 95,
+    "level": "HIGH",
+    "alert_allowed": True,
+    "label": "CONFIRMED HUMAN",
+    "reasons": [],
+}
+
 class MockStreamlitContainer:
     def __init__(self):
         self.markdown_calls = []
@@ -43,7 +52,14 @@ class TestDashboardIntegrity(unittest.TestCase):
             "heart_bpm": 75.0,
             "resp_bpm": 14.0,
             "presence": True,
-            "variance": 1.2
+            "variance": 1.2,
+            "presence_confidence": {
+                "score": 95,
+                "level": "HIGH",
+                "alert_allowed": True,
+                "label": "CONFIRMED HUMAN",
+                "reasons": [],
+            },
         }
         draw_vital_signs(telemetry, container)
         self.assertEqual(len(container.markdown_calls), 1)
@@ -53,6 +69,26 @@ class TestDashboardIntegrity(unittest.TestCase):
         self.assertIn("14", html)
         # Confidence should be a percentage, not 0
         self.assertNotIn("0%</span>", html)
+
+    def test_draw_vital_signs_hides_values_until_confident(self):
+        container = MockStreamlitContainer()
+        telemetry = {
+            "heart_bpm": 75.0,
+            "resp_bpm": 14.0,
+            "presence": True,
+            "variance": 1.2,
+            "presence_confidence": {
+                "score": 65,
+                "level": "MEDIUM",
+                "alert_allowed": False,
+                "label": "UNCONFIRMED MOTION",
+                "reasons": ["signal_quality_not_good"],
+            },
+        }
+        draw_vital_signs(telemetry, container)
+        html = container.markdown_calls[0][0]
+        self.assertIn("---", html)
+        self.assertIn("65", html)
 
     def test_draw_sleep_apnea_states(self):
         # Case 1: Absent
@@ -76,6 +112,7 @@ class TestDashboardIntegrity(unittest.TestCase):
         # Case 2: Active Apnea
         container = MockStreamlitContainer()
         telemetry["presence"] = True
+        telemetry["presence_confidence"] = CONFIRMED
         telemetry["apnea_status"]["is_apnea"] = True
         telemetry["apnea_status"]["current_event_duration"] = 15.2
         draw_sleep_apnea(telemetry, container)
@@ -91,7 +128,14 @@ class TestDashboardIntegrity(unittest.TestCase):
         }
         telemetry = {
             "presence": True,
-            "variance": 1.45
+            "variance": 1.45,
+            "presence_confidence": {
+                "score": 95,
+                "level": "HIGH",
+                "alert_allowed": True,
+                "label": "CONFIRMED HUMAN",
+                "reasons": [],
+            },
         }
         raw_hist = [24.5, 25.1, 24.8, 25.4, 25.0]
         draw_wifi_signal(stats, telemetry, raw_hist, container)
@@ -100,16 +144,54 @@ class TestDashboardIntegrity(unittest.TestCase):
         self.assertIn("1.45", html)
         self.assertIn("svg", html)
 
+    def test_draw_wifi_signal_does_not_count_unconfirmed_person(self):
+        container = MockStreamlitContainer()
+        stats = {"rssi": -45, "noise": -96}
+        telemetry = {
+            "presence": True,
+            "variance": 1.45,
+            "presence_confidence": {
+                "score": 65,
+                "level": "MEDIUM",
+                "alert_allowed": False,
+                "label": "UNCONFIRMED MOTION",
+                "reasons": ["signal_quality_not_good"],
+            },
+        }
+        draw_wifi_signal(stats, telemetry, [24.5, 25.1, 24.8], container)
+        html = container.markdown_calls[0][0]
+        self.assertIn("0 &nbsp;", html)
+        self.assertIn("UNCONFIRMED MOTION", html)
+
     def test_draw_presence_badge(self):
-        # Present
+        # Unconfirmed raw motion
         container_p = MockStreamlitContainer()
         draw_presence({"presence": True}, container_p)
-        self.assertIn("PRESENT", container_p.markdown_calls[0][0])
+        self.assertIn("VERIFYING", container_p.markdown_calls[0][0])
 
         # Absent
         container_a = MockStreamlitContainer()
         draw_presence({"presence": False}, container_a)
         self.assertIn("ABSENT", container_a.markdown_calls[0][0])
+
+    def test_draw_presence_verifies_before_human_claim(self):
+        container = MockStreamlitContainer()
+        draw_presence(
+            {
+                "presence": True,
+                "presence_confidence": {
+                    "score": 65,
+                    "level": "MEDIUM",
+                    "alert_allowed": False,
+                    "label": "UNCONFIRMED MOTION",
+                    "reasons": ["signal_quality_not_good"],
+                },
+            },
+            container,
+        )
+        html = container.markdown_calls[0][0]
+        self.assertIn("VERIFYING", html)
+        self.assertIn("UNCONFIRMED MOTION", html)
 
     def test_draw_apnea_events(self):
         container = MockStreamlitContainer()
@@ -133,6 +215,7 @@ class TestDashboardIntegrity(unittest.TestCase):
         container = MockStreamlitContainer()
         telemetry = {
             "presence": True,
+            "presence_confidence": CONFIRMED,
             "variance": 0.2,
             "apnea_status": {"is_apnea": False, "is_hypopnea": False}
         }

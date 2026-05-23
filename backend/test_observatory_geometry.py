@@ -3,12 +3,22 @@ import numpy as np
 import plotly.graph_objects as go
 from frontend.app import get_skeleton_coords, generate_3d_observatory
 
+
+CONFIRMED = {
+    "score": 95,
+    "level": "HIGH",
+    "alert_allowed": True,
+    "label": "CONFIRMED HUMAN",
+    "reasons": [],
+}
+
 class TestObservatoryGeometry(unittest.TestCase):
     def test_get_skeleton_coords_fall(self):
         # When a fall is detected, all joints should collapse to floor level Z = 0.15
         telemetry = {
             "fall_alert": True,
             "presence": True,
+            "presence_confidence": CONFIRMED,
             "resp_bpm": 12.0,
             "variance": 15.0,
             "apnea_status": {"is_apnea": False, "is_hypopnea": False}
@@ -24,6 +34,7 @@ class TestObservatoryGeometry(unittest.TestCase):
         telemetry = {
             "fall_alert": False,
             "presence": True,
+            "presence_confidence": CONFIRMED,
             "resp_bpm": 15.0,
             "variance": 0.5,
             "apnea_status": {"is_apnea": True, "is_hypopnea": False}
@@ -42,6 +53,7 @@ class TestObservatoryGeometry(unittest.TestCase):
         telemetry = {
             "fall_alert": False,
             "presence": True,
+            "presence_confidence": CONFIRMED,
             "resp_bpm": 24.0,
             "variance": 2.5,
             "apnea_status": {"is_apnea": False, "is_hypopnea": False}
@@ -74,6 +86,7 @@ class TestObservatoryGeometry(unittest.TestCase):
         # Check that generate_3d_observatory returns a valid Plotly Figure
         telemetry = {
             "presence": True,
+            "presence_confidence": CONFIRMED,
             "resp_bpm": 14.0,
             "variance": 0.8,
             "fall_alert": False,

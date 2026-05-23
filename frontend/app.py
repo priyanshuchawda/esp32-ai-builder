@@ -10,6 +10,7 @@ from collections import deque
 import plotly.graph_objects as go
 
 from backend.csi_calibration import PresenceCalibration
+from backend.csi_confidence import evaluate_presence_confidence
 from backend.csi_quality import SignalQualityMonitor
 
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
@@ -131,6 +132,29 @@ st.markdown("""
 # ----------------- CACHED SHARED RESOURCES -----------------
 BUFFER_SIZE = 200
 
+
+def default_presence_confidence():
+    return {
+        "score": 0,
+        "level": "LOW",
+        "alert_allowed": False,
+        "label": "ROOM EMPTY",
+        "reasons": ["no_presence_decision"],
+    }
+
+
+def with_presence_confidence(telemetry, signal_quality):
+    enriched = dict(telemetry)
+    enriched["presence_confidence"] = evaluate_presence_confidence(enriched, signal_quality)
+    return enriched
+
+
+def is_human_confirmed(telemetry):
+    confidence = telemetry.get("presence_confidence")
+    if confidence is None:
+        return False
+    return bool(confidence.get("alert_allowed", False))
+
 @st.cache_resource
 def get_global_resources():
     """Returns persistent, shared objects across sessions and reloads to avoid leaks."""
@@ -153,6 +177,7 @@ def get_global_resources():
             "baseline_std": 0.0,
             "threshold": 0.6
         },
+        "presence_confidence": default_presence_confidence(),
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -679,6 +704,8 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
                 update_calibration_config(config, telemetry)
+                signal_quality = quality_monitor.summary(now=time.time())
+                telemetry = with_presence_confidence(telemetry, signal_quality)
                 
                 ui_package = {
                     "stats": {
@@ -688,7 +715,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                         "noise": packet["noise"],
                         "freq_mhz": packet["freq_mhz"],
                         "fps": fps,
-                        "signal_quality": quality_monitor.summary(now=time.time())
+                        "signal_quality": signal_quality
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -715,6 +742,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
                 update_calibration_config(config, telemetry)
                 telemetry["presence"] = False
+                telemetry = with_presence_confidence(telemetry, signal_quality)
                 
                 ui_package = {
                     "stats": {
@@ -802,6 +830,8 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
                 update_calibration_config(config, telemetry)
+                signal_quality = quality_monitor.summary(now=time.time())
+                telemetry = with_presence_confidence(telemetry, signal_quality)
                 
                 ui_package = {
                     "stats": {
@@ -811,7 +841,7 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                         "noise": -95,
                         "freq_mhz": 2437,
                         "fps": fps,
-                        "signal_quality": quality_monitor.summary(now=time.time())
+                        "signal_quality": signal_quality
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -968,6 +998,8 @@ def simulator_loop(shutdown_event, data_queue, config):
         f_thresh = config.get("fall_threshold", 12.0)
         telemetry = dsp.process_telemetry(p_thresh, f_thresh)
         update_calibration_config(config, telemetry)
+        signal_quality = quality_monitor.summary(now=time.time())
+        telemetry = with_presence_confidence(telemetry, signal_quality)
         
         ui_package = {
             "stats": {
@@ -977,7 +1009,7 @@ def simulator_loop(shutdown_event, data_queue, config):
                 "noise": packet["noise"],
                 "freq_mhz": packet["freq_mhz"],
                 "fps": fps,
-                "signal_quality": quality_monitor.summary(now=time.time())
+                "signal_quality": signal_quality
             },
             "telemetry": telemetry,
             "raw_history": list(dsp.raw_history),
@@ -1025,6 +1057,7 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
             "baseline_std": 0.0,
             "threshold": 0.6
         },
+        "presence_confidence": default_presence_confidence(),
         "apnea_status": {
             "is_apnea": False,
             "is_hypopnea": False,
@@ -1111,7 +1144,7 @@ def get_skeleton_coords(telemetry):
     variance = telemetry.get("variance", 0.0)
     
     # 1. Fall Alert Posture (horizontal collapsed on floor)
-    if telemetry.get("fall_alert", False):
+    if is_human_confirmed(telemetry) and telemetry.get("fall_alert", False):
         joints = {
             "head": [0.0, 1.2, 0.15],
             "neck": [0.0, 0.9, 0.15],
@@ -1133,7 +1166,7 @@ def get_skeleton_coords(telemetry):
 
     # 2. Sleeping / Apnea screening posture
     is_sleeping = False
-    if telemetry.get("presence", False) and (is_apnea or is_hypopnea or variance < 1.0):
+    if is_human_confirmed(telemetry) and (is_apnea or is_hypopnea or variance < 1.0):
         is_sleeping = True
         
     if is_sleeping:
@@ -1166,7 +1199,7 @@ def get_skeleton_coords(telemetry):
         return joints, True
 
     # 3. Exercising / Squats posture (indicated by high variance & presence)
-    is_exercising = telemetry.get("presence", False) and variance >= 1.0
+    is_exercising = is_human_confirmed(telemetry) and variance >= 1.0
     if is_exercising:
         # 4-second squat cycles
         squat_val = 0.5 + 0.5 * np.sin(2 * np.pi * 0.25 * t)
@@ -1511,6 +1544,7 @@ standby_telemetry = {
         "baseline_std": 0.0,
         "threshold": 0.6
     },
+    "presence_confidence": default_presence_confidence(),
     "apnea_status": {
         "is_apnea": False,
         "is_hypopnea": False,
@@ -1560,28 +1594,31 @@ def draw_vital_signs(telemetry, container):
     heart_bpm = telemetry.get("heart_bpm", 0.0)
     resp_bpm = telemetry.get("resp_bpm", 0.0)
     presence = telemetry.get("presence", False)
+    human_confirmed = is_human_confirmed(telemetry)
     variance = telemetry.get("variance", 0.0)
+    confidence = telemetry.get("presence_confidence") or {}
+    confidence_val = int(confidence.get("score", 0))
     
     # Determine value strings
-    heart_str = f"{int(heart_bpm)}" if (presence and heart_bpm > 0) else "---"
-    resp_str = f"{int(resp_bpm)}" if (presence and resp_bpm > 0) else "---"
+    heart_str = f"{int(heart_bpm)}" if (human_confirmed and heart_bpm > 0) else "---"
+    resp_str = f"{int(resp_bpm)}" if (human_confirmed and resp_bpm > 0) else "---"
     
     # Determine progress bar percentages
-    if presence and heart_bpm > 0:
+    if human_confirmed and heart_bpm > 0:
         heart_pct = min(100, max(0, int((heart_bpm - 40) / 100 * 100)))
     else:
         heart_pct = 0
         
-    if presence and resp_bpm > 0:
+    if human_confirmed and resp_bpm > 0:
         resp_pct = min(100, max(0, int(resp_bpm / 40 * 100)))
     else:
         resp_pct = 0
         
-    if presence:
+    if presence and not confidence:
         t = time.time()
         var_boost = min(15, int(variance * 10))
         confidence_val = min(98, max(65, int(80 + np.sin(t) * 4 + var_boost)))
-    else:
+    elif not presence:
         confidence_val = 0
         
     html = f"""
@@ -1658,8 +1695,9 @@ def draw_sleep_apnea(telemetry, container):
     hypopneas_count = summary.get("hypopneas", 0)
     monitored_sec = apnea_status.get("hours", 0.0) * 3600.0
     presence = telemetry.get("presence", False)
+    human_confirmed = is_human_confirmed(telemetry)
     
-    if not presence:
+    if not human_confirmed:
         status_str = "<span class='grey-text'>[-] ENGINE INACTIVE</span>"
     elif is_apnea:
         status_str = f"<span class='red-text' style='font-weight:bold;'>⚠️ APNEA DETECTED ({cur_dur:.0f}s)</span>"
@@ -1710,14 +1748,19 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         "BAD": "#ff5555",
     }.get(quality_status, "#6a737d")
     quality_reason_text = ", ".join(quality_reasons[:2]) if quality_reasons else "stable"
+    confidence = telemetry.get("presence_confidence") or {}
+    confidence_label = confidence.get("label", "ROOM EMPTY")
+    human_confirmed = is_human_confirmed(telemetry)
     
     # Motion calculations
     motion_val = variance * 0.05 if presence else (0.002 + np.random.uniform(-0.001, 0.001))
     if motion_val < 0: motion_val = 0.0
     
-    persons_count = 1 if presence else 0
-    if presence:
+    persons_count = 1 if human_confirmed else 0
+    if human_confirmed:
         persons_dots = "<span style='color: #33ff33;'>●</span> <span style='color: #1b2028;'>● ● ● ● ● ● ●</span>"
+    elif presence:
+        persons_dots = "<span style='color: #ffeb3b;'>●</span> <span style='color: #1b2028;'>● ● ● ● ● ● ●</span>"
     else:
         persons_dots = "<span style='color: #1b2028;'>● ● ● ● ● ● ● ●</span>"
         
@@ -1787,6 +1830,11 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
                 {persons_count} &nbsp;&nbsp;&nbsp;&nbsp; {persons_dots}
             </span>
         </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Gate</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{confidence_label}</span>
+        </div>
         
         {sparkline_svg}
     </div>
@@ -1799,11 +1847,21 @@ def draw_presence(telemetry, container):
     effective_threshold = telemetry.get("effective_presence_threshold", 0.0)
     calibration = telemetry.get("calibration", {})
     calibration_state = "READY" if calibration.get("ready") else "ACTIVE" if calibration.get("active") else "MANUAL"
+    confidence = telemetry.get("presence_confidence") or default_presence_confidence()
+    confidence_score = int(confidence.get("score", 0))
+    confidence_label = confidence.get("label", "ROOM EMPTY")
+    reason_text = ", ".join(confidence.get("reasons", [])[:2]) or "clear"
     
-    if presence:
+    if is_human_confirmed(telemetry):
         presence_badge = """
         <div style='border: 1px solid #33ff33; background-color: rgba(51, 255, 51, 0.05); color: #33ff33; padding: 10px 16px; border-radius: 4px; font-weight: bold; font-size: 1.1rem; letter-spacing: 2px; display: inline-block; width: 100%; text-shadow: 0 0 6px rgba(51, 255, 51, 0.4); box-sizing: border-box; text-align: center;'>
-            PRESENT
+            CONFIRMED
+        </div>
+        """
+    elif presence:
+        presence_badge = """
+        <div style='border: 1px solid #ffeb3b; background-color: rgba(255, 235, 59, 0.05); color: #ffeb3b; padding: 10px 16px; border-radius: 4px; font-weight: bold; font-size: 1.1rem; letter-spacing: 2px; display: inline-block; width: 100%; box-sizing: border-box; text-align: center;'>
+            VERIFYING
         </div>
         """
     else:
@@ -1824,6 +1882,18 @@ def draw_presence(telemetry, container):
         <div style='display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.78rem;'>
             <span style='color: #8892b0; font-family: monospace;'>Calibration</span>
             <span style='font-weight: bold; color: #00ffcc; font-family: monospace;'>{calibration_state}</span>
+        </div>
+        <div style='display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Confidence</span>
+            <span style='font-weight: bold; color: #00ffcc; font-family: monospace;'>{confidence_score}%</span>
+        </div>
+        <div style='display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.72rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Gate</span>
+            <span style='font-weight: bold; color: #00ffcc; font-family: monospace; text-align: right;'>{confidence_label}</span>
+        </div>
+        <div style='display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.72rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Reason</span>
+            <span style='font-weight: bold; color: #00ffcc; font-family: monospace; text-align: right;'>{reason_text}</span>
         </div>
     </div>
     """
@@ -1862,7 +1932,7 @@ def draw_apnea_events(telemetry, container):
 
 
 def draw_indicators_and_keys(telemetry, container):
-    presence = telemetry.get("presence", False)
+    presence = is_human_confirmed(telemetry)
     variance = telemetry.get("variance", 0.0)
     
     # Determine mode active state
