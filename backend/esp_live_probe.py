@@ -39,6 +39,8 @@ def build_probe_lines(
     occupancy: dict,
     serial_result: SerialProbeResult | None = None,
 ) -> list[str]:
+    from backend.csi_power_summary import build_power_summary, format_power_summary_lines
+
     status = _overall_status(udp_summary, quality_summary, serial_result, config_summary)
     issue_part = f"issue={issue} " if issue is not None else ""
     lines = [
@@ -90,6 +92,14 @@ def build_probe_lines(
             ),
         ]
     )
+    summary_telemetry = {
+        "presence": occupancy.get("class") == "OCCUPIED",
+        "occupancy": occupancy,
+        "motion": {"display_level": "UNSTABLE", "trusted": False}
+        if quality_summary.get("status") in {"BAD", "WEAK"}
+        else {},
+    }
+    lines.extend(format_power_summary_lines(build_power_summary(summary_telemetry, quality_summary), prefix="POWER_SUMMARY"))
     for action in recommend_next_actions(config_summary, udp_summary, quality_summary, serial_result):
         lines.append(f"NEXT_ACTION {action}")
     return lines
