@@ -124,7 +124,8 @@ class TestDashboardIntegrity(unittest.TestCase):
         container = MockStreamlitContainer()
         stats = {
             "rssi": -45,
-            "noise": -96
+            "noise": -96,
+            "selected_subcarriers": [4, 8, 12],
         }
         telemetry = {
             "presence": True,
@@ -141,6 +142,7 @@ class TestDashboardIntegrity(unittest.TestCase):
         draw_wifi_signal(stats, telemetry, raw_hist, container)
         html = container.markdown_calls[0][0]
         self.assertIn("-45 dBm", html)
+        self.assertIn("4, 8, 12", html)
         self.assertIn("1.45", html)
         self.assertIn("svg", html)
 
