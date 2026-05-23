@@ -27,6 +27,9 @@
 #ifndef NODE_ID
 #define NODE_ID 1
 #endif
+#ifndef WIFI_CHANNEL
+#define WIFI_CHANNEL 0
+#endif
 
 namespace {
 constexpr uint32_t kBaudRate = 115200;
@@ -47,6 +50,7 @@ constexpr unsigned long kStatusPrintIntervalMs = 5000;
 bool g_csiStreaming = false;
 unsigned long g_lastReconnectAttemptMs = 0;
 unsigned long g_lastStatusPrintMs = 0;
+volatile int g_lastWifiDisconnectReason = -1;
 
 // Latest sample statistics for serial output
 struct CsiSample {
@@ -63,6 +67,26 @@ portMUX_TYPE g_sampleMux = portMUX_INITIALIZER_UNLOCKED;
 void printStatus(const char *message) {
   Serial.print("# ");
   Serial.println(message);
+}
+
+void printWifiFailureDetails() {
+  Serial.printf("# WIFI_STATUS_CODE %d\n", static_cast<int>(WiFi.status()));
+  Serial.printf("# WIFI_DISCONNECT_REASON %d\n", g_lastWifiDisconnectReason);
+}
+
+void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    g_lastWifiDisconnectReason = info.wifi_sta_disconnected.reason;
+  }
+}
+
+wl_status_t beginConfiguredWifi() {
+#ifdef WIFI_BSSID
+  const uint8_t bssid[] = WIFI_BSSID;
+  return WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL, bssid);
+#else
+  return WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL);
+#endif
 }
 
 // Function to construct and send ADR-018 binary packet over UDP
@@ -168,7 +192,11 @@ void csiCallback(void *, wifi_csi_info_t *data) {
 bool connectWifiWithTimeout(uint32_t timeoutMs) {
   printStatus("WIFI_CONNECTING");
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.persistent(false);
+  WiFi.setSleep(false);
+  WiFi.disconnect(false);
+  delay(100);
+  beginConfiguredWifi();
 
   const uint32_t startMs = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startMs < timeoutMs) {
@@ -177,6 +205,7 @@ bool connectWifiWithTimeout(uint32_t timeoutMs) {
 
   if (WiFi.status() != WL_CONNECTED) {
     printStatus("WIFI_CONNECT_FAILED");
+    printWifiFailureDetails();
     return false;
   }
   
@@ -248,12 +277,15 @@ bool ensureWifiConnected() {
   const unsigned long now = millis();
   if (now - g_lastStatusPrintMs >= kStatusPrintIntervalMs) {
     printStatus("WIFI_DISCONNECTED_RECONNECTING");
+    printWifiFailureDetails();
     g_lastStatusPrintMs = now;
   }
   if (now - g_lastReconnectAttemptMs >= kReconnectIntervalMs) {
     WiFi.disconnect(false);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.persistent(false);
+    WiFi.setSleep(false);
+    beginConfiguredWifi();
     g_lastReconnectAttemptMs = now;
   }
 
@@ -267,6 +299,7 @@ void setup() {
   delay(1000);
 
   printStatus("STARTING_ESP32_CSI_NODE");
+  WiFi.onEvent(onWifiEvent);
 
   g_csiStreaming = startRealCsiCapture();
   if (!g_csiStreaming) {
