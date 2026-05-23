@@ -10,6 +10,7 @@ from collections import deque
 import plotly.graph_objects as go
 
 from backend.csi_calibration import PresenceCalibration
+from backend.csi_quality import SignalQualityMonitor
 
 # Try importing scipy for Butter filters; if unavailable, we use a simple digital filter fallback
 try:
@@ -179,7 +180,19 @@ def get_global_resources():
         "rssi": -95,
         "noise": -96,
         "freq_mhz": 0,
-        "fps": 0.0
+        "fps": 0.0,
+        "signal_quality": {
+            "status": "BAD",
+            "fps": 0.0,
+            "packets": 0,
+            "age_seconds": 0.0,
+            "sequence_gaps": 0,
+            "rssi_min": 0,
+            "rssi_max": 0,
+            "rssi_spread": 0,
+            "subcarrier_modes": {},
+            "reasons": ["no_packets"]
+        }
     }
     return {
         "queue": queue.Queue(maxsize=1000),
@@ -633,6 +646,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
     sock.settimeout(0.2)
     
     dsp = RuViewDSP(fps=50.0)
+    quality_monitor = SignalQualityMonitor()
     packet_counter = 0
     last_fps_time = time.time()
     
@@ -642,6 +656,12 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
             packet = parse_adr018_packet(data)
             if packet:
                 apply_calibration_controls(dsp, config)
+                quality_monitor.record_packet(
+                    seq=packet["seq"],
+                    rssi=packet["rssi"],
+                    n_subcarriers=packet["n_subcarriers"],
+                    timestamp=time.time(),
+                )
                 packet_counter += 1
                 now = time.time()
                 if now - last_fps_time >= 1.0:
@@ -667,7 +687,8 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                         "rssi": packet["rssi"],
                         "noise": packet["noise"],
                         "freq_mhz": packet["freq_mhz"],
-                        "fps": fps
+                        "fps": fps,
+                        "signal_quality": quality_monitor.summary(now=time.time())
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -688,6 +709,7 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
             now = time.time()
             if now - last_fps_time > 3.0:
                 apply_calibration_controls(dsp, config)
+                signal_quality = quality_monitor.summary(now=now)
                 p_thresh = config.get("presence_threshold", 0.6)
                 f_thresh = config.get("fall_threshold", 12.0)
                 telemetry = dsp.process_telemetry(p_thresh, f_thresh)
@@ -701,7 +723,8 @@ def udp_receiver_loop(port, shutdown_event, data_queue, config):
                         "rssi": 0,
                         "noise": 0,
                         "freq_mhz": 0,
-                        "fps": 0.0
+                        "fps": 0.0,
+                        "signal_quality": signal_quality
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -736,7 +759,9 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
         return
 
     dsp = RuViewDSP(fps=50.0)
+    quality_monitor = SignalQualityMonitor()
     packet_counter = 0
+    serial_seq = 0
     last_fps_time = time.time()
     
     while not shutdown_event.is_set():
@@ -753,6 +778,13 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                 bins = [float(x) for x in parts[2:8]]
                 avg_signal = sum(bins) / len(bins)
                 packet_counter += 1
+                serial_seq += 1
+                quality_monitor.record_packet(
+                    seq=serial_seq,
+                    rssi=rssi,
+                    n_subcarriers=len(bins),
+                    timestamp=time.time(),
+                )
                 
                 now = time.time()
                 if now - last_fps_time >= 1.0:
@@ -774,11 +806,12 @@ def serial_receiver_loop(port_name, baud_rate, shutdown_event, data_queue, confi
                 ui_package = {
                     "stats": {
                         "node_id": 1,
-                        "seq": packet_counter,
+                        "seq": serial_seq,
                         "rssi": rssi,
                         "noise": -95,
                         "freq_mhz": 2437,
-                        "fps": fps
+                        "fps": fps,
+                        "signal_quality": quality_monitor.summary(now=time.time())
                     },
                     "telemetry": telemetry,
                     "raw_history": list(dsp.raw_history),
@@ -902,6 +935,7 @@ def generate_simulated_packet(seq, config_dict=None):
 
 def simulator_loop(shutdown_event, data_queue, config):
     dsp = RuViewDSP(fps=25.0)
+    quality_monitor = SignalQualityMonitor()
     packet_counter = 0
     last_fps_time = time.time()
     seq = 0
@@ -911,6 +945,12 @@ def simulator_loop(shutdown_event, data_queue, config):
         packet = generate_simulated_packet(seq, config)
         seq += 1
         packet_counter += 1
+        quality_monitor.record_packet(
+            seq=packet["seq"],
+            rssi=packet["rssi"],
+            n_subcarriers=packet["n_subcarriers"],
+            timestamp=time.time(),
+        )
         
         now = time.time()
         if now - last_fps_time >= 1.0:
@@ -936,7 +976,8 @@ def simulator_loop(shutdown_event, data_queue, config):
                 "rssi": packet["rssi"],
                 "noise": packet["noise"],
                 "freq_mhz": packet["freq_mhz"],
-                "fps": fps
+                "fps": fps,
+                "signal_quality": quality_monitor.summary(now=time.time())
             },
             "telemetry": telemetry,
             "raw_history": list(dsp.raw_history),
@@ -1011,7 +1052,19 @@ def start_receiver_thread(source_mode, port_to_bind, com_port_selected, serial_b
         "rssi": -95,
         "noise": -96,
         "freq_mhz": 0,
-        "fps": 0.0
+        "fps": 0.0,
+        "signal_quality": {
+            "status": "BAD",
+            "fps": 0.0,
+            "packets": 0,
+            "age_seconds": 0.0,
+            "sequence_gaps": 0,
+            "rssi_min": 0,
+            "rssi_max": 0,
+            "rssi_spread": 0,
+            "subcarrier_modes": {},
+            "reasons": ["no_packets"]
+        }
     }
     with resources["lock"]:
         resources["latest_package"] = {
@@ -1486,7 +1539,19 @@ standby_stats = {
     "rssi": -95,
     "noise": -96,
     "freq_mhz": 0,
-    "fps": 0.0
+    "fps": 0.0,
+    "signal_quality": {
+        "status": "BAD",
+        "fps": 0.0,
+        "packets": 0,
+        "age_seconds": 0.0,
+        "sequence_gaps": 0,
+        "rssi_min": 0,
+        "rssi_max": 0,
+        "rssi_spread": 0,
+        "subcarrier_modes": {},
+        "reasons": ["no_packets"]
+    }
 }
 
 # --- Premium Card Rendering Helpers (HTML/CSS) ---
@@ -1636,6 +1701,15 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
     rssi = stats.get("rssi", -95)
     variance = telemetry.get("variance", 0.0)
     presence = telemetry.get("presence", False)
+    signal_quality = stats.get("signal_quality", {})
+    quality_status = signal_quality.get("status", "BAD")
+    quality_reasons = signal_quality.get("reasons", [])
+    quality_color = {
+        "GOOD": "#33ff33",
+        "WEAK": "#ffeb3b",
+        "BAD": "#ff5555",
+    }.get(quality_status, "#6a737d")
+    quality_reason_text = ", ".join(quality_reasons[:2]) if quality_reasons else "stable"
     
     # Motion calculations
     motion_val = variance * 0.05 if presence else (0.002 + np.random.uniform(-0.001, 0.001))
@@ -1685,6 +1759,16 @@ def draw_wifi_signal(stats, telemetry, raw_hist, container):
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
             <span style='color: #8892b0; font-family: monospace;'>RSSI</span>
             <span style='font-weight: bold; color: #00ffff; font-family: monospace;'>{rssi} dBm</span>
+        </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Quality</span>
+            <span style='font-weight: bold; color: {quality_color}; font-family: monospace;'>{quality_status}</span>
+        </div>
+
+        <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.78rem;'>
+            <span style='color: #8892b0; font-family: monospace;'>Reason</span>
+            <span style='font-weight: bold; color: #00ffff; font-family: monospace; text-align: right;'>{quality_reason_text}</span>
         </div>
         
         <div style='display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem;'>

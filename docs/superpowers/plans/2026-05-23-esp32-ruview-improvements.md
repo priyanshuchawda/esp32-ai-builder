@@ -20,10 +20,10 @@
 
 ### Issue #22: Live CSI Signal Quality Scoring
 
-- [ ] Track FPS, sequence gaps, RSSI spread, timeout age, and subcarrier mix.
-- [ ] Compute `GOOD`, `WEAK`, or `BAD` quality state with reasons.
-- [ ] Show quality in terminal and Streamlit UI.
-- [ ] Verify with unit tests and live UDP sample.
+- [x] Track FPS, sequence gaps, RSSI spread, timeout age, and subcarrier mix.
+- [x] Compute `GOOD`, `WEAK`, or `BAD` quality state with reasons.
+- [x] Show quality in terminal and Streamlit UI.
+- [x] Verify with unit tests and live UDP sample.
 
 ### Issue #23: Test Collection Hygiene
 
