@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.csi_demo_simulator import SCENARIOS, build_demo_snapshot
 from backend.csi_power_summary import build_power_summary
+from backend.csi_spectrogram import build_demo_spectrogram
 from backend.esp_live_probe import (
     build_probe_lines,
     detect_local_ip,
@@ -107,7 +108,7 @@ def judge_live(
     """Run a short real UDP CSI probe and return dashboard-ready live data."""
 
     try:
-        udp_summary, quality_summary, modes, occupancy, fingerprint = run_udp_probe(
+        udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram = run_udp_probe(
             bind_ip=bind_ip,
             udp_port=udp_port,
             duration_sec=duration,
@@ -134,7 +135,7 @@ def judge_live(
     )
     overall_status = _line_value(lines[0], "status") or "UNKNOWN"
     next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
-    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, udp_summary)
+    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, spectrogram, udp_summary)
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
@@ -148,13 +149,20 @@ def judge_live(
         "config": config_summary,
         "occupancy": occupancy,
         "fingerprint": fingerprint,
+        "spectrogram": spectrogram,
         "snapshot": snapshot,
         "next_actions": next_actions,
         "lines": lines,
     }
 
 
-def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: dict, udp_summary: dict) -> dict:
+def _build_live_snapshot(
+    occupancy: dict,
+    quality_summary: dict,
+    fingerprint: dict,
+    spectrogram: dict,
+    udp_summary: dict,
+) -> dict:
     trusted = bool(occupancy.get("trusted"))
     occupied = occupancy.get("class") == "OCCUPIED"
     snapshot_quality = dict(quality_summary)
@@ -180,6 +188,7 @@ def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: di
         "quality": snapshot_quality,
         "summary": build_power_summary(telemetry, snapshot_quality),
         "fingerprint": fingerprint,
+        "spectrogram": spectrogram,
     }
     snapshot["room_state"] = LIVE_ROOM_TRACKER.observe(snapshot)
     return snapshot
@@ -187,6 +196,7 @@ def _build_live_snapshot(occupancy: dict, quality_summary: dict, fingerprint: di
 
 def _with_room_state(snapshot: dict) -> dict:
     snapshot["room_state"] = build_room_state(snapshot)
+    snapshot["spectrogram"] = build_demo_spectrogram(snapshot)
     return snapshot
 
 

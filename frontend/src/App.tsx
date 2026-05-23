@@ -67,6 +67,14 @@ type RoomState = {
   timeline: string
 }
 
+type Spectrogram = {
+  source: string
+  time_bins: number
+  subcarrier_bins: number
+  rows: number[][]
+  ascii: string
+}
+
 type ScenarioSnapshot = {
   scenario: string
   telemetry: Telemetry
@@ -74,6 +82,7 @@ type ScenarioSnapshot = {
   summary: Summary
   fingerprint: Fingerprint
   room_state?: RoomState
+  spectrogram?: Spectrogram
   source?: string
   note?: string
 }
@@ -430,6 +439,7 @@ function App() {
             <span>spread {formatNumber(selected.fingerprint.spread)}</span>
             <span>variance {formatNumber(selected.telemetry.variance)}</span>
           </div>
+          {selected.spectrogram ? <SpectrogramHeatmap spectrogram={selected.spectrogram} /> : null}
         </article>
 
         <article className="panel live-panel">
@@ -510,6 +520,35 @@ function App() {
         </article>
       </section>
     </main>
+  )
+}
+
+function SpectrogramHeatmap({ spectrogram }: { spectrogram: Spectrogram }) {
+  return (
+    <div className="spectrogram">
+      <div className="spectrogram-heading">
+        <span>CSI spectrogram</span>
+        <small>
+          {spectrogram.time_bins} x {spectrogram.subcarrier_bins}
+        </small>
+      </div>
+      <div
+        className="heatmap"
+        style={{
+          gridTemplateColumns: `repeat(${Math.max(1, spectrogram.subcarrier_bins)}, minmax(0, 1fr))`,
+        }}
+      >
+        {spectrogram.rows.flatMap((row, rowIndex) =>
+          row.map((value, columnIndex) => (
+            <span
+              aria-label={`heat ${value}`}
+              key={`${rowIndex}-${columnIndex}`}
+              style={{ backgroundColor: `hsl(${190 - value * 1.15} 82% ${22 + value * 0.36}%)` }}
+            />
+          )),
+        )}
+      </div>
+    </div>
   )
 }
 

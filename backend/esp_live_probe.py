@@ -109,9 +109,10 @@ def build_probe_lines(
     return lines
 
 
-def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float) -> tuple[dict, dict, dict[int, int], dict, dict]:
+def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float) -> tuple[dict, dict, dict[int, int], dict, dict, dict]:
     from backend.csi_fingerprint import build_fingerprint
     from backend.csi_quality import SignalQualityMonitor
+    from backend.csi_spectrogram import build_spectrogram
     from backend.csi_subcarriers import SubcarrierSelector
     from backend.csi_terminal_receiver import RuViewDSP, load_evaluator_report, parse_adr018_packet, with_presence_confidence
     from backend.live_occupancy import classify_occupancy
@@ -127,6 +128,7 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     packet_count = 0
     modes: dict[int, int] = {}
     latest_amplitudes = []
+    recent_frames = []
     started = time.time()
     end_at = started + duration_sec
 
@@ -141,6 +143,9 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
                 continue
             packet_count += 1
             latest_amplitudes = packet["amplitudes"]
+            recent_frames.append(packet["amplitudes"])
+            if len(recent_frames) > 96:
+                recent_frames.pop(0)
             modes[packet["n_subcarriers"]] = modes.get(packet["n_subcarriers"], 0) + 1
             quality.record_packet(
                 seq=packet["seq"],
@@ -159,7 +164,8 @@ def run_udp_probe(bind_ip: str, udp_port: int, duration_sec: int, min_fps: float
     telemetry = with_presence_confidence(dsp.process_telemetry(), quality_summary)
     occupancy = classify_occupancy(telemetry, quality_summary, load_evaluator_report())
     fingerprint = build_fingerprint(latest_amplitudes, bins=16)
-    return udp_summary, quality_summary, modes, occupancy, fingerprint
+    spectrogram = build_spectrogram(recent_frames, time_bins=24, subcarrier_bins=16)
+    return udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram
 
 
 def load_firmware_network_config(path: Path | None = None, text: str | None = None) -> dict:
@@ -293,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.serial_port:
         serial_result = probe_serial(args.serial_port, args.serial_baud, args.serial_seconds)
 
-    udp_summary, quality_summary, modes, occupancy, fingerprint = run_udp_probe(
+    udp_summary, quality_summary, modes, occupancy, fingerprint, _spectrogram = run_udp_probe(
         bind_ip=args.bind_ip,
         udp_port=args.udp_port,
         duration_sec=args.duration,

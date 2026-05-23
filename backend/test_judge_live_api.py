@@ -21,6 +21,7 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
             {128: 42},
             {"class": "OCCUPIED", "trusted": True, "reasons": []},
             {"bins": 16, "mean": 21.5, "spread": 8.0, "bars": "..::==++**##--__"},
+            {"source": "live_udp_frames", "time_bins": 3, "subcarrier_bins": 4, "rows": [[0, 20, 60, 100]], "ascii": ".-*#"},
         )
 
     monkeypatch.setattr("backend.main.run_udp_probe", fake_run_udp_probe)
@@ -45,3 +46,4 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["snapshot"]["summary"]["demo_state"] == "OCCUPIED_STILL"
     assert data["snapshot"]["room_state"]["label"]
     assert data["snapshot"]["fingerprint"]["bars"].isascii()
+    assert data["snapshot"]["spectrogram"]["source"] == "live_udp_frames"

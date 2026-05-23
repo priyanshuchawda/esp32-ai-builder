@@ -467,22 +467,26 @@ class RuViewDSP:
             filtered = clean_val
         self.filtered_history.append(filtered)
         
-        filter_window = list(self.filtered_history)[-80:]
+        filter_window = np.array(list(self.filtered_history)[-80:], dtype=float)
+        filter_window = filter_window - np.mean(filter_window)
 
         # 2. Extract Respiration Band (0.1 - 0.5 Hz)
-        resp_val = self._bandpass_filter(filter_window, 0.1, 0.5)
+        resp_val = self._bandpass_filter(filter_window, 0.1, 0.5, detrended=True)
         self.resp_history.append(resp_val)
         
         # 3. Extract Heart Rate Band (0.8 - 2.0 Hz)
-        heart_val = self._bandpass_filter(filter_window, 0.8, 2.0)
+        heart_val = self._bandpass_filter(filter_window, 0.8, 2.0, detrended=True)
         self.heart_history.append(heart_val)
         
-    def _bandpass_filter(self, data_list, low, high):
+    def _bandpass_filter(self, data_list, low, high, detrended=False):
         if len(data_list) < 15:
             return 0.0
             
-        data = np.array(data_list, dtype=float)
-        data_detrended = data - np.mean(data)
+        if detrended:
+            data_detrended = data_list
+        else:
+            data = np.array(data_list, dtype=float)
+            data_detrended = data - np.mean(data)
         
         if HAS_SCIPY:
             try:
