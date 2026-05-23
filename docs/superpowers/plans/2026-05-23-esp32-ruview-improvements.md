@@ -27,9 +27,9 @@
 
 ### Issue #23: Test Collection Hygiene
 
-- [ ] Add pytest configuration so active tests run without collecting archived RuView/legacy tests.
-- [ ] Document intended commands.
-- [ ] Verify root and scoped test commands.
+- [x] Add pytest configuration so active tests run without collecting archived RuView/legacy tests.
+- [x] Document intended commands.
+- [x] Verify root and scoped test commands.
 
 ### Issue #24: Calibrated Confidence Gating
 
