@@ -22,6 +22,15 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
             {"class": "OCCUPIED", "trusted": True, "reasons": []},
             {"bins": 16, "mean": 21.5, "spread": 8.0, "bars": "..::==++**##--__"},
             {"source": "live_udp_frames", "time_bins": 3, "subcarrier_bins": 4, "rows": [[0, 20, 60, 100]], "ascii": ".-*#"},
+            {
+                "state": "walking",
+                "trusted": True,
+                "cadence_spm": 96.0,
+                "dominant_frequency_hz": 1.6,
+                "regularity": 0.68,
+                "stride_regularity": 0.61,
+                "sample_count": 120,
+            },
         )
 
     monkeypatch.setattr("backend.main.run_udp_probe", fake_run_udp_probe)
@@ -51,6 +60,8 @@ def test_judge_live_api_wraps_actual_probe_payload(monkeypatch):
     assert data["snapshot"]["material_change"]["samples"] >= 1
     assert data["snapshot"]["material_change"]["trusted"] is True
     assert data["snapshot"]["material_change"]["trust_reason"] == "quality_good"
+    assert data["snapshot"]["motion_cadence"]["state"] == "walking"
+    assert data["motion_cadence"]["cadence_spm"] == 96.0
 
 
 def test_judge_live_material_tracker_uses_short_dashboard_baseline():

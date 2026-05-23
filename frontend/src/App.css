@@ -205,16 +205,43 @@
   margin: 8px 0 4px;
 }
 
+.cadence-strip {
+  display: grid;
+  grid-template-columns: 1fr 0.75fr auto;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.cadence-strip.compact {
+  margin: 0 0 14px;
+}
+
 .material-strip span,
-.material-strip code {
+.material-strip code,
+.cadence-strip span,
+.cadence-strip code {
   min-height: 44px;
   padding: 8px 10px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: rgba(245, 158, 11, 0.08);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.material-strip span,
+.material-strip code {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.cadence-strip span,
+.cadence-strip code {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.cadence-strip.trusted span,
+.cadence-strip.trusted code {
+  border-color: rgba(45, 212, 191, 0.38);
 }
 
 .material-strip.changed span,
@@ -223,7 +250,8 @@
   color: var(--warn);
 }
 
-.material-strip strong {
+.material-strip strong,
+.cadence-strip strong {
   display: block;
   color: var(--text-strong);
   font-size: 14px;
@@ -234,6 +262,13 @@
   display: inline-flex;
   align-items: center;
   color: var(--warn);
+  letter-spacing: 0;
+}
+
+.cadence-strip code {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
   letter-spacing: 0;
 }
 
@@ -589,6 +624,7 @@
   .capability-grid,
   .room-state-strip,
   .material-strip,
+  .cadence-strip,
   .metric-grid {
     grid-template-columns: 1fr;
   }

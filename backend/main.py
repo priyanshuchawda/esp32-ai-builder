@@ -19,6 +19,7 @@ from backend.esp_live_probe import (
     summarize_target_ip,
 )
 from backend.material_change import MaterialChangeTracker, build_demo_material_change, fingerprint_to_amplitudes
+from backend.motion_cadence import build_demo_motion_cadence
 from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
 
 
@@ -68,6 +69,7 @@ CAPABILITIES = [
     "fall-event simulation",
     "CSI fingerprint",
     "material change watch",
+    "motion cadence watch",
     "quality gating",
     "Telegram alert path",
 ]
@@ -111,7 +113,7 @@ def judge_live(
     """Run a short real UDP CSI probe and return dashboard-ready live data."""
 
     try:
-        udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram = run_udp_probe(
+        udp_summary, quality_summary, modes, occupancy, fingerprint, spectrogram, motion_cadence = run_udp_probe(
             bind_ip=bind_ip,
             udp_port=udp_port,
             duration_sec=duration,
@@ -138,7 +140,7 @@ def judge_live(
     )
     overall_status = _line_value(lines[0], "status") or "UNKNOWN"
     next_actions = [line.split(" ", 1)[1] for line in lines if line.startswith("NEXT_ACTION ")]
-    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, spectrogram, udp_summary)
+    snapshot = _build_live_snapshot(occupancy, quality_summary, fingerprint, spectrogram, udp_summary, motion_cadence)
 
     return {
         "title": "ESP32 Wi-Fi CSI Spatial Intelligence",
@@ -153,6 +155,7 @@ def judge_live(
         "occupancy": occupancy,
         "fingerprint": fingerprint,
         "spectrogram": spectrogram,
+        "motion_cadence": motion_cadence,
         "snapshot": snapshot,
         "next_actions": next_actions,
         "lines": lines,
@@ -165,6 +168,7 @@ def _build_live_snapshot(
     fingerprint: dict,
     spectrogram: dict,
     udp_summary: dict,
+    motion_cadence: dict,
 ) -> dict:
     trusted = bool(occupancy.get("trusted"))
     occupied = occupancy.get("class") == "OCCUPIED"
@@ -192,6 +196,7 @@ def _build_live_snapshot(
         "summary": build_power_summary(telemetry, snapshot_quality),
         "fingerprint": fingerprint,
         "spectrogram": spectrogram,
+        "motion_cadence": motion_cadence,
     }
     snapshot["room_state"] = LIVE_ROOM_TRACKER.observe(snapshot)
     material_change = LIVE_MATERIAL_TRACKER.observe(fingerprint_to_amplitudes(fingerprint))
@@ -209,6 +214,7 @@ def _with_room_state(snapshot: dict) -> dict:
     snapshot["material_change"]["trust_reason"] = (
         "quality_good" if snapshot["material_change"]["trusted"] else "signal_quality_not_good"
     )
+    snapshot["motion_cadence"] = build_demo_motion_cadence(snapshot)
     return snapshot
 
 
