@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.ai_advice import query_ai_advice
 from backend.csi_demo_simulator import SCENARIOS, build_demo_snapshot
 from backend.csi_power_summary import build_power_summary
 from backend.csi_spectrogram import build_demo_spectrogram
@@ -270,6 +271,71 @@ def observatory_live(
     state["duration_sec"] = duration
     state["udp"] = udp_summary
     return state
+
+
+@app.get("/api/ai-advice")
+def ai_advice(
+    mode: str = Query(default="demo", pattern="^(live|demo)$"),
+    scenario: str = "occupied_still",
+    duration: int = Query(default=3, ge=1, le=15),
+    bind_ip: str = "0.0.0.0",
+    udp_port: int = Query(default=5005, ge=1, le=65535),
+    min_fps: float = Query(default=5.0, ge=0.1, le=100.0),
+) -> dict:
+    """Return Gemma-ready explanation for compact CSI observatory state."""
+
+    if mode == "demo":
+        selected_key = scenario.lower()
+        if selected_key not in SCENARIOS:
+            valid = ", ".join(sorted(SCENARIOS))
+            raise HTTPException(
+                status_code=400, detail=f"Unknown scenario. Valid scenarios: {valid}"
+            )
+        snapshot = _with_room_state(build_demo_snapshot(selected_key))
+        observatory = build_observatory_state(snapshot, source="demo")
+    else:
+        try:
+            (
+                udp_summary,
+                quality_summary,
+                _modes,
+                occupancy,
+                telemetry,
+                fingerprint,
+                spectrogram,
+                motion_cadence,
+            ) = run_udp_probe(
+                bind_ip=bind_ip,
+                udp_port=udp_port,
+                duration_sec=duration,
+                min_fps=min_fps,
+            )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503, detail=f"Live probe failed: {type(exc).__name__}"
+            ) from exc
+        snapshot = _build_live_snapshot(
+            occupancy,
+            telemetry,
+            quality_summary,
+            fingerprint,
+            spectrogram,
+            udp_summary,
+            motion_cadence,
+        )
+        observatory = build_observatory_state(
+            snapshot,
+            source="actual_udp_probe",
+            udp_summary=udp_summary,
+        )
+
+    return {
+        "title": "ESP32 Wi-Fi CSI AI Advice",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": observatory["source"],
+        "observatory": observatory,
+        "advice": query_ai_advice(observatory),
+    }
 
 
 def _build_live_snapshot(
