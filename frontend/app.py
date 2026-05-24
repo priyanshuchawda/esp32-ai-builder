@@ -562,8 +562,12 @@ class RuViewDSP:
         # 1. Presence (using signal variance over last 3 seconds)
         window_size = min(len(raw_arr), int(self.fps * 3))
         recent_raw = raw_arr[-window_size:]
-        variance = np.var(recent_raw)
-        std_dev = variance ** 0.5
+        if len(recent_raw) > 0:
+            variance = np.var(recent_raw)
+            std_dev = variance ** 0.5
+        else:
+            variance = 0.0
+            std_dev = 0.0
         
         presence = (variance > effective_presence_threshold) or (std_dev > (effective_presence_threshold * 0.8))
         
