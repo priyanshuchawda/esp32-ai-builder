@@ -9,6 +9,7 @@ import {
   Radio,
   RefreshCw,
   Router,
+  Send,
   ShieldCheck,
   Signal,
   UserRound,
@@ -44,6 +45,7 @@ import {
   type JudgeBriefingPayload,
 } from './judgeBriefing'
 import { formatPersonRange, formatVitalValue } from './observatoryDisplay'
+import { formatTelegramDelivery, type TelegramDeliveryPayload } from './telegramDelivery'
 
 type Quality = {
   status: string
@@ -483,6 +485,10 @@ function App() {
     'idle' | 'running' | 'done' | 'error'
   >('idle')
   const [judgeBriefingError, setJudgeBriefingError] = useState('')
+  const [telegramDelivery, setTelegramDelivery] = useState<TelegramDeliveryPayload | null>(null)
+  const [telegramDeliveryStatus, setTelegramDeliveryStatus] = useState<
+    'idle' | 'sending' | 'sent' | 'error'
+  >('idle')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -575,6 +581,8 @@ function App() {
     setJudgeBriefing(null)
     setJudgeBriefingStatus('idle')
     setJudgeBriefingError('')
+    setTelegramDelivery(null)
+    setTelegramDeliveryStatus('idle')
     fetch(`${API_BASE}/api/observatory-live?mode=live&duration=3&udp_port=5005`)
       .then((response) => {
         if (!response.ok) {
@@ -647,6 +655,39 @@ function App() {
       .catch((error: unknown) => {
         setJudgeBriefingError(error instanceof Error ? error.message : 'Judge briefing failed')
         setJudgeBriefingStatus('error')
+      })
+  }
+
+  function sendTelegramAdvice() {
+    setTelegramDelivery(null)
+    setTelegramDeliveryStatus('sending')
+    fetch(`${API_BASE}/api/telegram-delivery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: advice.telegram_message,
+        event_signature: eventSignature(observatory),
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Telegram delivery returned ${response.status}`)
+        }
+        return response.json() as Promise<TelegramDeliveryPayload>
+      })
+      .then((delivery) => {
+        setTelegramDelivery(delivery)
+        setTelegramDeliveryStatus(delivery.status === 'sent' ? 'sent' : 'error')
+      })
+      .catch((error: unknown) => {
+        setTelegramDelivery({
+          status: 'failed',
+          event_signature: eventSignature(observatory),
+          message_id: null,
+          destination: null,
+          detail: error instanceof Error ? error.message : 'Telegram delivery failed.',
+        })
+        setTelegramDeliveryStatus('error')
       })
   }
 
@@ -733,6 +774,8 @@ function App() {
             setEvidenceEvents([])
             setJudgeBriefing(null)
             setJudgeBriefingStatus('idle')
+            setTelegramDelivery(null)
+            setTelegramDeliveryStatus('idle')
           }}
           type="button"
         >
@@ -748,6 +791,8 @@ function App() {
           briefing={judgeBriefing}
           briefingError={judgeBriefingError}
           briefingStatus={judgeBriefingStatus}
+          delivery={telegramDelivery}
+          deliveryStatus={telegramDeliveryStatus}
           mode={observatoryMode}
           onDemo={() => {
             setObservatoryMode('demo')
@@ -759,8 +804,11 @@ function App() {
             setEvidenceEvents([])
             setJudgeBriefing(null)
             setJudgeBriefingStatus('idle')
+            setTelegramDelivery(null)
+            setTelegramDeliveryStatus('idle')
           }}
           onBriefing={runJudgeBriefing}
+          onTelegramSend={sendTelegramAdvice}
           onLive={runObservatoryLiveProbe}
           payload={observatory}
           advice={advice}
@@ -1009,11 +1057,14 @@ function ObservatoryExperience({
   briefing,
   briefingError,
   briefingStatus,
+  delivery,
+  deliveryStatus,
   error,
   events,
   mode,
   onDemo,
   onBriefing,
+  onTelegramSend,
   onLive,
   payload,
   status,
@@ -1022,11 +1073,14 @@ function ObservatoryExperience({
   briefing: JudgeBriefing | null
   briefingError: string
   briefingStatus: 'idle' | 'running' | 'done' | 'error'
+  delivery: TelegramDeliveryPayload | null
+  deliveryStatus: 'idle' | 'sending' | 'sent' | 'error'
   error: string
   events: EvidenceEvent[]
   mode: ObservatoryMode
   onDemo: () => void
   onBriefing: () => void
+  onTelegramSend: () => void
   onLive: () => void
   payload: ObservatoryPayload
   status: 'idle' | 'running' | 'done' | 'error'
@@ -1078,15 +1132,33 @@ function ObservatoryExperience({
             <code>{advice.telegram_message}</code>
           </div>
           {mode === 'live' ? (
-            <button
-              className="briefing-button"
-              disabled={briefingStatus === 'running' || status === 'running'}
-              onClick={onBriefing}
-              type="button"
-            >
-              <RefreshCw size={15} />
-              {briefingStatus === 'running' ? 'Generating briefing' : 'Generate briefing'}
-            </button>
+            <>
+              <div className="telegram-delivery">
+                <button
+                  className="briefing-button"
+                  disabled={deliveryStatus === 'sending' || status === 'running'}
+                  onClick={onTelegramSend}
+                  type="button"
+                >
+                  <Send size={15} />
+                  {deliveryStatus === 'sending' ? 'Sending' : 'Send Telegram'}
+                </button>
+                {delivery ? (
+                  <span className={`delivery-status ${delivery.status}`}>
+                    {formatTelegramDelivery(delivery)}
+                  </span>
+                ) : null}
+              </div>
+              <button
+                className="briefing-button"
+                disabled={briefingStatus === 'running' || status === 'running'}
+                onClick={onBriefing}
+                type="button"
+              >
+                <RefreshCw size={15} />
+                {briefingStatus === 'running' ? 'Generating briefing' : 'Generate briefing'}
+              </button>
+            </>
           ) : null}
         </div>
 
