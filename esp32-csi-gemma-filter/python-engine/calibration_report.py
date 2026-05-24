@@ -3,8 +3,6 @@ import json
 import math
 from pathlib import Path
 
-import config
-
 FEATURE_FIELDS = [
     "rssi_mean",
     "rssi_std",
@@ -20,6 +18,7 @@ FEATURE_FIELDS = [
 ]
 DEFAULT_TARGET_LABELS = ["empty", "sitting", "walking"]
 DEFAULT_MIN_SAMPLES_PER_WINDOW = 10
+DEFAULT_LABELS_DIR = Path(__file__).resolve().parent / "data" / "labels"
 
 
 def load_labeled_windows(labels_dir: str | Path) -> list[dict]:
@@ -178,7 +177,7 @@ def build_readiness(
 
 
 def build_report(
-    labels_dir: str | Path = config.LABELS_DIR,
+    labels_dir: str | Path = DEFAULT_LABELS_DIR,
     *,
     target_labels: list[str] | None = None,
     min_records_per_label: int = 3,
