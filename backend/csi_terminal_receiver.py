@@ -6,18 +6,15 @@ signals, detects presence/breathing/heart rate/falls, and displays them.
 """
 
 import sys
-import os
 import socket
 import struct
 import time
-import math
 from collections import deque
 import numpy as np
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
-from rich.layout import Layout
 from rich.text import Text
 
 try:
@@ -406,13 +403,13 @@ def parse_adr018_packet(data):
         
         # Super-fast inline signed conversion
         for i in range(0, min(len(iq_data), n_subcarriers * 2) - 1, 2):
-            I = iq_data[i]
-            if I >= 128:
-                I -= 256
+            in_phase = iq_data[i]
+            if in_phase >= 128:
+                in_phase -= 256
             Q = iq_data[i + 1]
             if Q >= 128:
                 Q -= 256
-            amplitudes.append((I * I + Q * Q) ** 0.5)
+            amplitudes.append((in_phase * in_phase + Q * Q) ** 0.5)
             
         raw_signal = sum(amplitudes) / len(amplitudes) if amplitudes else 0.0
         
@@ -503,7 +500,7 @@ def main():
                 except socket.timeout:
                     # Keep updates going even if no packets are arriving
                     pass
-                except Exception as e:
+                except Exception:
                     # Suppress single packet parsing errors
                     pass
                 

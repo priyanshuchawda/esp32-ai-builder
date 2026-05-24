@@ -2,8 +2,7 @@ import unittest
 import threading
 import time
 import random
-from unittest.mock import MagicMock
-from frontend.app import get_global_resources, RuViewDSP
+from frontend.app import get_global_resources
 
 class TestMultisessionConcurrency(unittest.TestCase):
     def setUp(self):

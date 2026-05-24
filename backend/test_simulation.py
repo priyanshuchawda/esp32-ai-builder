@@ -1,6 +1,5 @@
 import unittest
 import time as py_time
-import numpy as np
 from frontend.app import generate_simulated_packet, RuViewDSP
 
 class TestSignalSimulation(unittest.TestCase):
