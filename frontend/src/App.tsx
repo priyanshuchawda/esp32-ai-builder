@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -23,7 +23,14 @@ import {
   formatAdviceModel,
   type AiAdvice,
   type AiAdvicePayload,
+  type AiInterpretPayload,
 } from './aiAdvice'
+import {
+  beginEvidenceEvent,
+  completeEvidenceEvent,
+  eventSignature,
+  type EvidenceEvent,
+} from './evidenceTimeline'
 import { formatPersonRange, formatVitalValue } from './observatoryDisplay'
 
 type Quality = {
@@ -452,6 +459,8 @@ function App() {
   const [observatoryStatus, setObservatoryStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [observatoryError, setObservatoryError] = useState('')
   const [aiAdvice, setAiAdvice] = useState<AiAdvice | null>(null)
+  const [evidenceEvents, setEvidenceEvents] = useState<EvidenceEvent[]>([])
+  const latestEventSignature = useRef<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -541,17 +550,47 @@ function App() {
     setObservatoryStatus('running')
     setObservatoryError('')
     setAiAdvice(null)
-    fetch(`${API_BASE}/api/ai-advice?mode=live&duration=3&udp_port=5005`)
+    fetch(`${API_BASE}/api/observatory-live?mode=live&duration=3&udp_port=5005`)
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`AI advice live returned ${response.status}`)
+          throw new Error(`Live observatory returned ${response.status}`)
         }
-        return response.json() as Promise<AiAdvicePayload>
+        return response.json() as Promise<ObservatoryPayload>
       })
-      .then((data) => {
-        setObservatoryPayload(data.observatory)
-        setAiAdvice(data.advice)
+      .then((snapshot) => {
+        setObservatoryPayload(snapshot)
+        setAiAdvice(buildFallbackAiAdvice(snapshot))
         setObservatoryStatus('done')
+
+        const signature = eventSignature(snapshot)
+        if (latestEventSignature.current === signature) {
+          return
+        }
+        latestEventSignature.current = signature
+        setEvidenceEvents((events) => beginEvidenceEvent(events, snapshot, new Date().toISOString()))
+
+        fetch(`${API_BASE}/api/ai-advice/interpret`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ observatory: snapshot }),
+        })
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`Gemma interpretation returned ${response.status}`)
+            }
+            return response.json() as Promise<AiInterpretPayload>
+          })
+          .then((interpretation) => {
+            setAiAdvice(interpretation.advice)
+            setEvidenceEvents((events) =>
+              completeEvidenceEvent(events, interpretation.event_signature, interpretation.advice),
+            )
+          })
+          .catch(() => {
+            const fallbackAdvice = buildFallbackAiAdvice(snapshot)
+            setAiAdvice(fallbackAdvice)
+            setEvidenceEvents((events) => completeEvidenceEvent(events, signature, fallbackAdvice))
+          })
       })
       .catch((error: unknown) => {
         const fallbackObservatory = buildFallbackObservatory(liveProbe?.snapshot ?? payload.live, 'local_fallback')
@@ -621,6 +660,8 @@ function App() {
             setObservatoryStatus('running')
             setObservatoryError('')
             setAiAdvice(null)
+            latestEventSignature.current = null
+            setEvidenceEvents([])
           }}
           type="button"
         >
@@ -632,6 +673,7 @@ function App() {
       {activeView === 'observatory' ? (
         <ObservatoryExperience
           error={observatoryError}
+          events={evidenceEvents}
           mode={observatoryMode}
           onDemo={() => {
             setObservatoryMode('demo')
@@ -639,6 +681,8 @@ function App() {
             setObservatoryStatus('running')
             setObservatoryError('')
             setAiAdvice(null)
+            latestEventSignature.current = null
+            setEvidenceEvents([])
           }}
           onLive={runObservatoryLiveProbe}
           payload={observatory}
@@ -831,6 +875,7 @@ function App() {
 function ObservatoryExperience({
   advice,
   error,
+  events,
   mode,
   onDemo,
   onLive,
@@ -839,6 +884,7 @@ function ObservatoryExperience({
 }: {
   advice: AiAdvice
   error: string
+  events: EvidenceEvent[]
   mode: ObservatoryMode
   onDemo: () => void
   onLive: () => void
@@ -873,7 +919,7 @@ function ObservatoryExperience({
       <aside className="observatory-hud" aria-label="observatory signal summary">
         <div className={`hud-block ai-advice-card advice-${statusClass(advice.status)}`}>
           <div className="hud-heading-row">
-            <p className="eyebrow">Gemma advice</p>
+            <p className="eyebrow">Interpretation</p>
             <span>{formatAdviceModel(advice)}</span>
           </div>
           <strong>{advice.judge_caption}</strong>
@@ -888,10 +934,47 @@ function ObservatoryExperience({
             <strong>{advice.next_action}</strong>
           </div>
           <div className="telegram-copy">
-            <span>Telegram</span>
+            <span>Message ready</span>
             <code>{advice.telegram_message}</code>
           </div>
         </div>
+
+        {mode === 'live' ? (
+          <div className="hud-block evidence-timeline">
+            <div className="hud-heading-row">
+              <p className="eyebrow">Evidence timeline</p>
+              <span>{events.length} events</span>
+            </div>
+            {events.length === 0 ? (
+              <p className="timeline-empty">No live transitions captured.</p>
+            ) : (
+              events.map((event) => (
+                <div className="evidence-event" key={`${event.capturedAt}-${event.signature}`}>
+                  <div className="evidence-event-head">
+                    <strong>ESP inference</strong>
+                    <time>{new Date(event.capturedAt).toLocaleTimeString()}</time>
+                  </div>
+                  <div className="evidence-chip-list">
+                    <span>{event.observatory.signal.quality}</span>
+                    <span>{event.observatory.visual.pose_state.replaceAll('_', ' ')}</span>
+                    <span>{event.observatory.visual.trust}</span>
+                  </div>
+                  <div className="event-interpretation">
+                    <span>Gemma interpretation</span>
+                    <strong>
+                      {event.state === 'pending'
+                        ? 'Analyzing captured evidence...'
+                        : event.advice?.judge_caption}
+                    </strong>
+                    {event.advice ? (
+                      <small>{formatAdviceModel(event.advice)} | Message ready</small>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
 
         <div className="hud-block">
           <p className="eyebrow">Wi-Fi signal</p>

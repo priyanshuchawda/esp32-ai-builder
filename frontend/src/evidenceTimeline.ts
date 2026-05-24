@@ -29,14 +29,15 @@ export function beginEvidenceEvent(
   if (events[0]?.signature === signature) {
     return events
   }
+  const event: EvidenceEvent = {
+    signature,
+    capturedAt,
+    observatory,
+    state: 'pending',
+    advice: null,
+  }
   return [
-    {
-      signature,
-      capturedAt,
-      observatory,
-      state: 'pending',
-      advice: null,
-    },
+    event,
     ...events,
   ].slice(0, 5)
 }
