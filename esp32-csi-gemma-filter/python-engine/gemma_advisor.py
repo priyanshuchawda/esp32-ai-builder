@@ -176,7 +176,10 @@ def query_gemini_advisor(features: dict, client_factory=None) -> dict:
     client = (
         client_factory()
         if client_factory
-        else genai.Client(api_key=config.GEMINI_API_KEY)
+        else genai.Client(
+            api_key=config.GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=config.GEMINI_HTTP_TIMEOUT_MS),
+        )
     )
     primary_model = config.GEMINI_GEMMA_MODEL
 

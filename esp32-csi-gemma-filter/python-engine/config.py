@@ -28,6 +28,7 @@ GEMINI_GEMMA_FALLBACK_MODEL = os.getenv(
     "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
 ).strip()
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "10000"))
 
 # Ollama Local API Settings
 OLLAMA_URL = "http://localhost:11434/api/chat"
