@@ -281,7 +281,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--labels-dir",
-        default=config.LABELS_DIR,
+        default=DEFAULT_LABELS_DIR,
         help="Directory containing labeled JSONL files.",
     )
     parser.add_argument(
