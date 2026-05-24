@@ -45,7 +45,7 @@ def get_rule_based_decision(features: dict) -> dict:
     signal_std = features.get("signal_std", 0.0)
 
     if outlier_ratio > config.FALLBACK_OUTLIER_RATIO_THRESHOLD:
-        return {
+        decision = {
             "filter": "median",
             "window_size": 5,
             "outlier_threshold": 3.0,
@@ -53,8 +53,9 @@ def get_rule_based_decision(features: dict) -> dict:
             "confidence": 1.0,
             "reason": f"Rule-based fallback: high outlier ratio detected ({outlier_ratio:.2f} > {config.FALLBACK_OUTLIER_RATIO_THRESHOLD:.2f})",
         }
+        return with_advisor_metadata(decision, provider="rules", model="rules")
     elif signal_std > config.FALLBACK_HIGH_STD_THRESHOLD:
-        return {
+        decision = {
             "filter": "moving_average",
             "window_size": 7,
             "outlier_threshold": 3.0,
@@ -62,8 +63,9 @@ def get_rule_based_decision(features: dict) -> dict:
             "confidence": 1.0,
             "reason": f"Rule-based fallback: high signal standard deviation ({signal_std:.2f} > {config.FALLBACK_HIGH_STD_THRESHOLD:.2f})",
         }
+        return with_advisor_metadata(decision, provider="rules", model="rules")
     elif signal_std > config.FALLBACK_NOISE_STD_THRESHOLD:
-        return {
+        decision = {
             "filter": "lowpass",
             "window_size": 5,
             "outlier_threshold": 3.0,
@@ -71,8 +73,9 @@ def get_rule_based_decision(features: dict) -> dict:
             "confidence": 1.0,
             "reason": f"Rule-based fallback: smooth but noisy signal detected (std: {signal_std:.2f})",
         }
+        return with_advisor_metadata(decision, provider="rules", model="rules")
     else:
-        return {
+        decision = {
             "filter": "none",
             "window_size": 5,
             "outlier_threshold": 3.0,
@@ -80,6 +83,7 @@ def get_rule_based_decision(features: dict) -> dict:
             "confidence": 1.0,
             "reason": "Rule-based fallback: signal is clean, no filter needed",
         }
+        return with_advisor_metadata(decision, provider="rules", model="rules")
 
 
 def cleanse_json_response(text: str) -> str:
@@ -115,6 +119,22 @@ def parse_advisor_decision(text: str) -> dict | None:
     return None
 
 
+def with_advisor_metadata(
+    decision: dict,
+    *,
+    provider: str,
+    model: str,
+    primary_model: str | None = None,
+    fallback_used: bool = False,
+) -> dict:
+    decision = dict(decision)
+    decision["advisor_provider"] = provider
+    decision["advisor_model"] = model
+    decision["advisor_primary_model"] = primary_model or model
+    decision["advisor_fallback_used"] = fallback_used
+    return decision
+
+
 def build_advisor_prompt(features: dict) -> str:
     return (
         "Here are the summary features of the current signal window:\n"
@@ -123,52 +143,93 @@ def build_advisor_prompt(features: dict) -> str:
     )
 
 
+def hosted_gemma_models() -> list[str]:
+    models = [
+        config.GEMINI_GEMMA_MODEL,
+        config.GEMINI_GEMMA_FALLBACK_MODEL,
+    ]
+    ordered: list[str] = []
+    for model in models:
+        model = (model or "").strip()
+        if model and model not in ordered:
+            ordered.append(model)
+    return ordered
+
+
 def query_gemini_advisor(features: dict, client_factory=None) -> dict:
     """
     Queries hosted Gemma 4 through the Gemini API with current features.
     Falls back to rule-based decision if anything fails.
     """
     if not config.GEMINI_API_KEY:
-        logger.info("GEMINI_API_KEY is not set. Falling back to local rule-based advisor.")
+        logger.info(
+            "GEMINI_API_KEY is not set. Falling back to local rule-based advisor."
+        )
         return get_rule_based_decision(features)
 
     if genai is None or types is None:
-        logger.warning("google-genai is not installed. Falling back to local rule-based advisor.")
+        logger.warning(
+            "google-genai is not installed. Falling back to local rule-based advisor."
+        )
         return get_rule_based_decision(features)
 
-    try:
+    client = (
+        client_factory()
+        if client_factory
+        else genai.Client(api_key=config.GEMINI_API_KEY)
+    )
+    primary_model = config.GEMINI_GEMMA_MODEL
+
+    for model_index, model in enumerate(hosted_gemma_models()):
+        fallback_used = model_index > 0
         logger.info(
-            "Querying hosted Gemma model '%s' through the Gemini API...",
-            config.GEMINI_GEMMA_MODEL,
-        )
-        client = client_factory() if client_factory else genai.Client(api_key=config.GEMINI_API_KEY)
-        thinking_config = None
-        if config.GEMINI_THINKING_LEVEL:
-            thinking_config = types.ThinkingConfig(
-                thinking_level=config.GEMINI_THINKING_LEVEL
-            )
-        response = client.models.generate_content(
-            model=config.GEMINI_GEMMA_MODEL,
-            contents=build_advisor_prompt(features),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.0,
-                response_mime_type="application/json",
-                thinking_config=thinking_config,
-            ),
+            "Querying hosted Gemma model '%s' through the Gemini API%s...",
+            model,
+            " as fallback" if fallback_used else "",
         )
 
-        decision = parse_advisor_decision(response.text or "")
-        if decision is not None:
-            logger.info(
-                "Successfully received hosted Gemma advice: %s filter selected.",
-                decision["filter"],
+        try:
+            thinking_config = None
+            if config.GEMINI_THINKING_LEVEL:
+                thinking_config = types.ThinkingConfig(
+                    thinking_level=config.GEMINI_THINKING_LEVEL
+                )
+            response = client.models.generate_content(
+                model=model,
+                contents=build_advisor_prompt(features),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                    thinking_config=thinking_config,
+                ),
             )
-            return decision
-    except json.JSONDecodeError as e:
-        logger.warning("Failed to parse hosted Gemma output as JSON: %s", e)
-    except Exception as e:
-        logger.warning("Unexpected error when querying hosted Gemma: %s", e)
+
+            decision = parse_advisor_decision(response.text or "")
+            if decision is not None:
+                logger.info(
+                    "Successfully received hosted Gemma advice from '%s': %s filter selected.",
+                    model,
+                    decision["filter"],
+                )
+                return with_advisor_metadata(
+                    decision,
+                    provider="gemini",
+                    model=model,
+                    primary_model=primary_model,
+                    fallback_used=fallback_used,
+                )
+            logger.warning(
+                "Hosted Gemma model '%s' returned invalid advisor JSON.", model
+            )
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse hosted Gemma output from '%s' as JSON: %s", model, e
+            )
+        except Exception as e:
+            logger.warning(
+                "Unexpected error when querying hosted Gemma model '%s': %s", model, e
+            )
 
     logger.info("Falling back to local rule-based advisor.")
     return get_rule_based_decision(features)
@@ -210,7 +271,9 @@ def query_ollama_advisor(features: dict) -> dict:
                 logger.info(
                     f"Successfully received Gemma advice: {decision['filter']} filter selected."
                 )
-                return decision
+                return with_advisor_metadata(
+                    decision, provider="ollama", model=config.OLLAMA_MODEL
+                )
         else:
             logger.warning(f"Ollama returned HTTP error status: {response.status_code}")
 

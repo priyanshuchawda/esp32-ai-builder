@@ -24,6 +24,9 @@ GEMMA_ADVISOR_PROVIDER = os.getenv("GEMMA_ADVISOR_PROVIDER", "gemini").strip().l
 # Hosted Gemini API Settings
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_GEMMA_MODEL = os.getenv("GEMINI_GEMMA_MODEL", "gemma-4-31b-it").strip()
+GEMINI_GEMMA_FALLBACK_MODEL = os.getenv(
+    "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
+).strip()
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
 
 # Ollama Local API Settings
@@ -52,5 +55,11 @@ FALLBACK_HIGH_STD_THRESHOLD = 2.0
 FALLBACK_NOISE_STD_THRESHOLD = 0.2
 
 # Ensure directories exist
-for directory in [RAW_DATA_DIR, FILTERED_DATA_DIR, DECISIONS_DIR, PLOTS_DIR, LABELS_DIR]:
+for directory in [
+    RAW_DATA_DIR,
+    FILTERED_DATA_DIR,
+    DECISIONS_DIR,
+    PLOTS_DIR,
+    LABELS_DIR,
+]:
     os.makedirs(directory, exist_ok=True)
