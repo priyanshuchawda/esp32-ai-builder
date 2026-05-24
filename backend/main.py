@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.ai_advice import build_event_signature, query_ai_advice
 from backend.calibration_coach import (
@@ -34,6 +34,7 @@ from backend.motion_cadence import build_demo_motion_cadence
 from backend.observatory_state import build_observatory_state
 from backend.person_count import estimate_person_count
 from backend.room_state_tracker import OnlineRoomStateTracker, build_room_state
+from backend.telegram_delivery import deliver_prepared_message
 
 
 app = FastAPI(title="ESP32 Wi-Fi CSI Spatial Intelligence")
@@ -95,6 +96,11 @@ INTERPRET_REQUIRED_SECTIONS = ("source", "visual", "persons", "signal", "vitals"
 
 class AiInterpretRequest(BaseModel):
     observatory: dict
+
+
+class TelegramDeliveryRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=500)
+    event_signature: str = Field(min_length=1, max_length=200)
 
 
 @app.get("/api/judge-demo")
@@ -405,6 +411,13 @@ def judge_briefing(request: AiInterpretRequest) -> dict:
         "calibration": calibration,
         "briefing": query_judge_briefing(request.observatory, calibration),
     }
+
+
+@app.post("/api/telegram-delivery")
+def telegram_delivery(request: TelegramDeliveryRequest) -> dict:
+    """Deliver one explicitly requested, already prepared operator message."""
+
+    return deliver_prepared_message(request.message, request.event_signature)
 
 
 def _build_live_snapshot(
