@@ -26,7 +26,7 @@ GEMINI_GEMMA_FALLBACK_MODEL = os.getenv(
     "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
 ).strip()
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
-GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "10000"))
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "60000"))
 
 SYSTEM_PROMPT = """You explain Wi-Fi CSI room-sensing output for a judge demo.
 You never claim camera vision, identity, medical diagnosis, or true DensePose.

@@ -18,7 +18,7 @@ Do not commit real tokens. Copy `esp32-csi-gemma-filter/.env.example` to a local
 - `GEMINI_GEMMA_MODEL`: Primary hosted advisor model, defaults to `gemma-4-31b-it`.
 - `GEMINI_GEMMA_FALLBACK_MODEL`: Hosted retry model, defaults to `gemma-4-26b-a4b-it`.
 - `GEMINI_HTTP_TIMEOUT_MS`: Maximum wait per hosted Gemma attempt, defaults to
-  `10000` for responsive live demos.
+  `60000` because Gemma 4 thinking responses can take more than 20 seconds.
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token from BotFather.
 - `TELEGRAM_CHAT_ID`: Your chat ID after you send `/start` to the bot.
 - `HUMAN_ALERT_ENABLED=true`: Enables Telegram alerts when human presence is detected.

@@ -17,8 +17,9 @@ Useful endpoints:
 
 `/api/ai-advice` uses `gemma-4-31b-it` as the primary hosted model and
 `gemma-4-26b-a4b-it` as fallback when `GEMINI_API_KEY` is available. Hosted
-calls are bounded by `GEMINI_HTTP_TIMEOUT_MS` (default `10000`) so live mode
-falls back to local rules instead of hanging. It sends only summarized CSI
+calls are bounded by `GEMINI_HTTP_TIMEOUT_MS` (default `60000`) so Gemma 4
+thinking responses have time to complete while still permitting local fallback.
+It sends only summarized CSI
 state, never raw CSI samples or secrets. If hosted Gemma is unavailable, it
 returns deterministic local rule advice.
 
