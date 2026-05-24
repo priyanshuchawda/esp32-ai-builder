@@ -6,9 +6,10 @@ from frontend.app import (
     parse_adr018_packet,
     RuViewDSP,
     generate_simulated_packet,
-    standby_stats,
-    standby_telemetry
 )
+
+LIVE_DSP_FPS = 50.0
+MAX_DSP_PROCESSING_MS = (1000.0 / LIVE_DSP_FPS) * 0.5
 
 class TestPerformance(unittest.TestCase):
     def setUp(self):
@@ -46,7 +47,7 @@ class TestPerformance(unittest.TestCase):
         self.assertLess(avg_time_ms, 1.0, f"Packet parsing is too slow: {avg_time_ms:.4f} ms")
 
     def test_dsp_processing_performance(self):
-        """Verify that ingestion and telemetry extraction for one sample runs in under 1 ms."""
+        """Keep DSP below half of a 50 Hz frame interval for live-processing headroom."""
         iterations = 300
         start_time = time.perf_counter()
         
@@ -58,7 +59,11 @@ class TestPerformance(unittest.TestCase):
         avg_time_ms = (elapsed / iterations) * 1000.0
         
         print(f"\n[PERF] dsp.add_sample + process_telemetry: {avg_time_ms:.4f} ms per sample")
-        self.assertLess(avg_time_ms, 1.0, f"DSP iteration is too slow: {avg_time_ms:.4f} ms")
+        self.assertLess(
+            avg_time_ms,
+            MAX_DSP_PROCESSING_MS,
+            f"DSP iteration exceeds {MAX_DSP_PROCESSING_MS:.1f} ms live budget: {avg_time_ms:.4f} ms",
+        )
 
     def test_simulator_performance(self):
         """Verify that generating a simulated packet executes in under 1 ms."""
