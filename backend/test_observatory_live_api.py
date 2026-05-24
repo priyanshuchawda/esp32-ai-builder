@@ -88,7 +88,45 @@ def test_observatory_live_uses_probe_snapshot(monkeypatch):
     assert data["source"] == "actual_udp_probe"
     assert data["visual"]["pose_state"] == "walking"
     assert data["visual"]["trust"] == "trusted"
-    assert data["persons"]["range"] == "1"
+    assert data["persons"]["range"] == "1?"
+    assert data["persons"]["trusted"] is False
+    assert "single_link_count_not_verified" in data["persons"]["reasons"]
     assert data["signal"]["packets"] == 60
     assert data["vitals"]["resp_bpm"] == 18.0
     assert data["vitals"]["heart_bpm"] == 88.0
+    assert data["vitals"]["available"] is False
+    assert data["vitals"]["trusted"] is False
+    assert data["vitals"]["label"] == "motion blocks estimate"
+
+
+def test_observatory_live_marks_still_vitals_as_experimental_candidate(monkeypatch):
+    def fake_run_udp_probe(bind_ip, udp_port, duration_sec, min_fps):
+        return (
+            {"status": "PASS", "reason": "ok", "packets": 60, "fps": 20.0},
+            {"status": "GOOD", "fps": 20.0, "reasons": []},
+            {128: 60},
+            {"class": "OCCUPIED", "trusted": True, "reasons": []},
+            {
+                "presence": True,
+                "resp_bpm": 15.0,
+                "heart_bpm": 72.0,
+                "fall_detected": False,
+                "motion": {"display_level": "STILL", "score": 0.1, "trusted": True},
+            },
+            {"bins": 16, "mean": 20.0, "spread": 10.0, "bars": "..::==++**##--__"},
+            {"source": "live_udp_frames", "rows": [[0, 100]], "ascii": ".#"},
+            {"state": "stationary", "trusted": True, "cadence_spm": 0.0},
+        )
+
+    monkeypatch.setattr("backend.main.run_udp_probe", fake_run_udp_probe)
+    monkeypatch.setattr("backend.main.load_firmware_network_config", lambda path: {})
+    monkeypatch.setattr("backend.main.detect_local_ip", lambda: "192.168.29.10")
+
+    response = TestClient(app).get("/api/observatory-live?mode=live&duration=2")
+    data = response.json()
+
+    assert data["persons"]["range"] == "1?"
+    assert data["persons"]["trusted"] is False
+    assert data["vitals"]["available"] is True
+    assert data["vitals"]["trusted"] is False
+    assert data["vitals"]["label"] == "experimental estimate"

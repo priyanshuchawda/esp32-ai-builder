@@ -33,6 +33,9 @@ const weakObservatory: ObservatoryPayload = {
     resp_bpm: 0,
     heart_bpm: 0,
     available: false,
+    trusted: false,
+    label: 'not available',
+    reasons: ['signal_quality_not_good'],
   },
   motion: {
     display_level: 'UNSTABLE',

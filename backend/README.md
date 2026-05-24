@@ -19,3 +19,8 @@ calls are bounded by `GEMINI_HTTP_TIMEOUT_MS` (default `10000`) so live mode
 falls back to local rules instead of hanging. It sends only summarized CSI
 state, never raw CSI samples or secrets. If hosted Gemma is unavailable, it
 returns deterministic local rule advice.
+
+For `actual_udp_probe` Observatory responses, occupied person counts are shown
+as single-link candidates (`1?` / `2+?`) rather than verified counts. Live
+vital numbers are hidden during motion or weak/unsuitable occupancy, and any
+still-room value that passes screening is labeled as an experimental estimate.

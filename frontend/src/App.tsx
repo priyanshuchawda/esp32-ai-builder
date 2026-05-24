@@ -24,6 +24,7 @@ import {
   type AiAdvice,
   type AiAdvicePayload,
 } from './aiAdvice'
+import { formatPersonRange, formatVitalValue } from './observatoryDisplay'
 
 type Quality = {
   status: string
@@ -425,6 +426,9 @@ function buildFallbackObservatory(snapshot: ScenarioSnapshot, source: string): O
       resp_bpm: snapshot.telemetry.resp_bpm,
       heart_bpm: snapshot.telemetry.heart_bpm,
       available: Boolean(snapshot.telemetry.resp_bpm || snapshot.telemetry.heart_bpm),
+      trusted: false,
+      label: 'local estimate',
+      reasons: ['api_unavailable'],
     },
     motion: {
       display_level: snapshot.telemetry.motion.display_level,
@@ -902,16 +906,17 @@ function ObservatoryExperience({
         <div className="hud-block">
           <p className="eyebrow">Presence</p>
           <div className={`presence-banner ${payload.persons.trusted ? 'trusted' : ''}`}>
-            <strong>{payload.persons.range}</strong>
+            <strong>{formatPersonRange(payload.persons)}</strong>
             <span>{payload.persons.label}</span>
           </div>
         </div>
 
         <div className="hud-block">
           <p className="eyebrow">Vitals</p>
+          <p className="measurement-note">{payload.vitals.label}</p>
           <div className="hud-grid">
-            <Metric icon={<HeartPulse size={18} />} label="Heart" value={`${formatNumber(payload.vitals.heart_bpm)} bpm`} />
-            <Metric icon={<Waves size={18} />} label="Breath" value={`${formatNumber(payload.vitals.resp_bpm)} bpm`} />
+            <Metric icon={<HeartPulse size={18} />} label="Heart" value={formatVitalValue(payload.vitals, payload.vitals.heart_bpm)} />
+            <Metric icon={<Waves size={18} />} label="Breath" value={formatVitalValue(payload.vitals, payload.vitals.resp_bpm)} />
             <Metric icon={<Activity size={18} />} label="Motion" value={payload.motion.display_level} />
             <Metric icon={<Signal size={18} />} label="Cadence" value={`${formatNumber(payload.motion.cadence_spm, 0)} spm`} />
           </div>

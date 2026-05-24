@@ -352,6 +352,14 @@
   text-transform: uppercase;
 }
 
+.measurement-note {
+  margin: -2px 0 10px;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .reason-list {
   display: flex;
   flex-wrap: wrap;
