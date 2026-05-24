@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -92,6 +93,7 @@ CAPABILITIES = [
 LIVE_ROOM_TRACKER = OnlineRoomStateTracker()
 LIVE_MATERIAL_TRACKER = MaterialChangeTracker(baseline_frames=4)
 INTERPRET_REQUIRED_SECTIONS = ("source", "visual", "persons", "signal", "vitals", "motion")
+LOCAL_UI_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class AiInterpretRequest(BaseModel):
@@ -414,9 +416,15 @@ def judge_briefing(request: AiInterpretRequest) -> dict:
 
 
 @app.post("/api/telegram-delivery")
-def telegram_delivery(request: TelegramDeliveryRequest) -> dict:
+def telegram_delivery(
+    request: TelegramDeliveryRequest, origin: str | None = Header(default=None)
+) -> dict:
     """Deliver one explicitly requested, already prepared operator message."""
 
+    if origin and urlparse(origin).hostname not in LOCAL_UI_HOSTS:
+        raise HTTPException(
+            status_code=403, detail="Telegram delivery is restricted to the local UI."
+        )
     return deliver_prepared_message(request.message, request.event_signature)
 
 

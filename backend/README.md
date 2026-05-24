@@ -49,4 +49,5 @@ confident wording.
 
 `POST /api/telegram-delivery` is not an automatic alert path. It uses local
 ignored Telegram credentials only after an explicit UI send action and never
-returns the bot token or full chat identifier.
+returns the bot token or full chat identifier. Browser delivery requests are
+accepted only from a localhost UI origin.

@@ -81,6 +81,7 @@ def test_delivery_endpoint_returns_sender_ack(monkeypatch):
 
     response = TestClient(app).post(
         "/api/telegram-delivery",
+        headers={"Origin": "http://127.0.0.1:5198"},
         json={"message": "Prepared.", "event_signature": "event-sig"},
     )
 
@@ -96,3 +97,24 @@ def test_delivery_endpoint_rejects_empty_message():
     )
 
     assert response.status_code == 422
+
+
+def test_delivery_endpoint_rejects_foreign_browser_origin(monkeypatch):
+    monkeypatch.setattr(
+        "backend.main.deliver_prepared_message",
+        lambda message, event_signature: {
+            "status": "sent",
+            "event_signature": event_signature,
+            "message_id": 21,
+            "destination": "...1234",
+            "detail": message,
+        },
+    )
+
+    response = TestClient(app).post(
+        "/api/telegram-delivery",
+        headers={"Origin": "https://unrelated.example"},
+        json={"message": "Prepared.", "event_signature": "event-sig"},
+    )
+
+    assert response.status_code == 403
