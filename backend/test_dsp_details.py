@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-import time
+import warnings
 import frontend.app as app
 from frontend.app import RuViewDSP
 
@@ -40,19 +40,22 @@ class TestDSPDetails(unittest.TestCase):
         for _ in range(50):
             dsp.filtered_history.append(25.0)
             
-        # Check that there is no fall alert initially
-        telemetry = dsp.process_telemetry(presence_threshold=0.6, fall_threshold=10.0)
-        self.assertFalse(telemetry["fall_alert"])
-        
-        # Inject a sudden acceleration spike (e.g. 25 -> 35 -> 10 -> 25)
-        # This will create a large second derivative (deceleration/acceleration spike)
-        # diff(25, 25, 35, 10, 25) -> d1 = (0, 10, -25, 15) -> d2 = (10, -35, 40) -> max absolute is 40.
-        dsp.filtered_history.append(25.0)
-        dsp.filtered_history.append(35.0)
-        dsp.filtered_history.append(10.0)
-        dsp.filtered_history.append(25.0)
-        
-        telemetry = dsp.process_telemetry(presence_threshold=0.6, fall_threshold=10.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+
+            # Check that there is no fall alert initially
+            telemetry = dsp.process_telemetry(presence_threshold=0.6, fall_threshold=10.0)
+            self.assertFalse(telemetry["fall_alert"])
+
+            # Inject a sudden acceleration spike (e.g. 25 -> 35 -> 10 -> 25)
+            # This creates a large second derivative without requiring raw signal history.
+            dsp.filtered_history.append(25.0)
+            dsp.filtered_history.append(35.0)
+            dsp.filtered_history.append(10.0)
+            dsp.filtered_history.append(25.0)
+
+            telemetry = dsp.process_telemetry(presence_threshold=0.6, fall_threshold=10.0)
+
         self.assertTrue(telemetry["fall_alert"])
         self.assertGreater(telemetry["acceleration"], 10.0)
 
@@ -114,8 +117,6 @@ class TestDSPDetails(unittest.TestCase):
         finally:
             # Restore SciPy flag
             app.HAS_SCIPY = 'scipy' in globals() or any('scipy' in str(m) for m in globals().values())
-            # Let's verify manually using imported scipy status
-            from scipy.signal import butter
             app.HAS_SCIPY = True
 
     def test_add_sample_filters_large_spikes_before_presence_history(self):
