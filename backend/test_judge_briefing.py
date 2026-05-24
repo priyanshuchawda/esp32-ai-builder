@@ -67,6 +67,10 @@ def test_judge_briefing_retries_fallback_gemma_model(monkeypatch):
     assert briefing["provider"] == "gemini"
     assert briefing["fallback_used"] is True
     assert "no trusted activity" in briefing["sensing_claim"].lower()
+    assert briefing["evidence"] == [
+        "Signal quality is weak with weak display trust.",
+        "7 packets were summarized for this event.",
+    ]
 
 
 def test_judge_briefing_endpoint_uses_posted_snapshot_without_probe(monkeypatch):

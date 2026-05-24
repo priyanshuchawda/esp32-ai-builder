@@ -130,6 +130,7 @@ def _align_with_evidence(
     )[:2]
     if quality != "GOOD" or trust in {"weak", "blocked"}:
         aligned["sensing_claim"] = local["sensing_claim"]
+        aligned["evidence"] = local["evidence"]
         aligned["next_action"] = local["next_action"]
     return aligned
 
