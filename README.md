@@ -97,7 +97,8 @@ then requests Gemma interpretation only when the visible evidence state
 changes. The evidence timeline separates ESP inference from Gemma
 interpretation and retains the five latest transitions. The panel shows which
 model responded, prepares a Telegram-safe message without claiming delivery,
-and blocks activity claims when signal quality is not trusted. Single-link
+and, in Live ESP mode, exposes an explicit **Send Telegram** action with a
+masked delivery acknowledgment from the local UI only. It blocks activity claims when signal quality is not trusted. Single-link
 live counts appear as candidates, and live vital estimates are suppressed
 during motion or low-confidence conditions.
 

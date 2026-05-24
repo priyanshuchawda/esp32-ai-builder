@@ -18,6 +18,8 @@ Useful endpoints:
   activity-label readiness and held-out evaluation report.
 - `POST /api/judge-briefing`: generates an on-demand judge report from one
   posted compact Observatory snapshot and local calibration readiness.
+- `POST /api/telegram-delivery`: sends one already displayed, operator-approved
+  message and returns only a masked Telegram acknowledgment.
 
 `/api/ai-advice` uses `gemma-4-31b-it` as the primary hosted model and
 `gemma-4-26b-a4b-it` as fallback when `GEMINI_API_KEY` is available. Hosted
@@ -44,3 +46,8 @@ start a capture or transmit raw CSI records.
 `POST /api/judge-briefing` does not perform a live probe. Weak signal or
 blocked trust remains an untrusted claim even if hosted Gemma produces more
 confident wording.
+
+`POST /api/telegram-delivery` is not an automatic alert path. It uses local
+ignored Telegram credentials only after an explicit UI send action and never
+returns the bot token or full chat identifier. Browser delivery requests are
+accepted only from a localhost UI origin.

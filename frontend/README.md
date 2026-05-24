@@ -19,6 +19,8 @@ includes the operational dashboard and the full-screen Observatory view.
   capture label without creating data.
 - **Judge briefing**: after a Live ESP snapshot, explicitly generates a
   bounded Gemma report from that captured evidence and calibration status.
+- **Telegram acknowledgment**: in Live ESP mode only, explicitly sends the
+  visible prepared message and shows the masked delivery result.
 
 The live view only claims an activity state when the backend trust gate allows
 it. Weak data renders a guarded explanation instead of a human/activity claim.
@@ -46,6 +48,8 @@ Open `http://127.0.0.1:5177`, choose **Observatory**, then choose **Live ESP**
 for a three-second real UDP capture. The scene updates from the ESP snapshot
 first; a hosted Gemma interpretation is then attached to each changed
 evidence state.
+Use **Send Telegram** only after reviewing the prepared message. Delivery is
+operator-triggered and reports an acknowledgment without displaying secrets.
 
 ## Validate
 
