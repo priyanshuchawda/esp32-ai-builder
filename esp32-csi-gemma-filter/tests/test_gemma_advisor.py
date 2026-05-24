@@ -108,6 +108,27 @@ def test_query_gemini_advisor_uses_fallback_model_after_primary_error(monkeypatc
     ]
 
 
+def test_query_gemini_advisor_builds_client_with_bounded_timeout(monkeypatch):
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(config, "GEMINI_HTTP_TIMEOUT_MS", 12345)
+
+    fake_client = MagicMock()
+    fake_response = MagicMock()
+    fake_response.text = '{"filter":"none","window_size":3,"outlier_threshold":3.0,"lowpass_alpha":0.25,"confidence":0.8,"reason":"Quiet signal."}'
+    fake_client.models.generate_content.return_value = fake_response
+    captured = {}
+
+    def fake_client_factory(**kwargs):
+        captured.update(kwargs)
+        return fake_client
+
+    monkeypatch.setattr("gemma_advisor.genai.Client", fake_client_factory)
+
+    query_gemini_advisor({"outlier_ratio": 0.0, "signal_std": 0.1})
+
+    assert captured["http_options"].timeout == 12345
+
+
 def test_query_gemini_advisor_avoids_duplicate_fallback_model(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(config, "GEMINI_GEMMA_MODEL", "gemma-4-31b-it")

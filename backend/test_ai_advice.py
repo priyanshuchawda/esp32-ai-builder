@@ -71,6 +71,9 @@ def test_ai_advice_uses_primary_gemma_model(monkeypatch):
     assert advice["provider"] == "gemini"
     assert advice["model"] == "gemma-4-31b-it"
     assert advice["fallback_used"] is False
+    assert advice["status"] == "weak"
+    assert "blocked" in advice["judge_caption"].lower()
+    assert "trusted walking" not in advice["telegram_message"].lower()
     assert fake_models.calls[0]["model"] == "gemma-4-31b-it"
 
 
@@ -111,6 +114,79 @@ def test_ai_advice_retries_fallback_gemma_model(monkeypatch):
         "gemma-4-31b-it",
         "gemma-4-26b-a4b-it",
     ]
+
+
+def test_ai_advice_builds_hosted_client_with_bounded_timeout(monkeypatch):
+    monkeypatch.setattr("backend.ai_advice.GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr("backend.ai_advice.GEMINI_HTTP_TIMEOUT_MS", 12345)
+    captured = {}
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            class Response:
+                text = '{"status":"weak","room_interpretation":"Signal weak.","why":["weak"],"next_action":"Wait.","judge_caption":"Blocked.","telegram_message":"Weak CSI.","confidence":0.4}'
+
+            return Response()
+
+    class FakeClient:
+        models = FakeModels()
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr("backend.ai_advice.genai.Client", fake_client)
+
+    from backend.ai_advice import query_ai_advice
+
+    query_ai_advice(WEAK_OBSERVATORY)
+
+    assert captured["http_options"].timeout == 12345
+
+
+def test_ai_advice_aligns_empty_room_trust_gate(monkeypatch):
+    monkeypatch.setattr("backend.ai_advice.GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr("backend.ai_advice.GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
+    monkeypatch.setattr(
+        "backend.ai_advice.GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
+    )
+
+    trusted_empty = {
+        **WEAK_OBSERVATORY,
+        "visual": {
+            **WEAK_OBSERVATORY["visual"],
+            "pose_state": "none",
+            "trust": "trusted",
+            "reasons": ["empty_room_baseline"],
+        },
+        "persons": {"range": "0", "label": "empty baseline", "trusted": True},
+        "signal": {
+            **WEAK_OBSERVATORY["signal"],
+            "quality": "GOOD",
+            "fps": 34.0,
+            "packets": 102,
+            "reasons": [],
+        },
+    }
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            class Response:
+                text = '{"status":"weak","room_interpretation":"No moving person is visible.","why":["no motion"],"next_action":"Collect more packets.","judge_caption":"Gemma says weak.","telegram_message":"Weak CSI.","confidence":0.62}'
+
+            return Response()
+
+    class FakeClient:
+        models = FakeModels()
+
+    from backend.ai_advice import query_ai_advice
+
+    advice = query_ai_advice(trusted_empty, client_factory=lambda: FakeClient())
+
+    assert advice["provider"] == "gemini"
+    assert advice["status"] == "trusted"
+    assert "empty-room baseline" in advice["room_interpretation"]
+    assert advice["confidence"] >= 0.8
 
 
 def test_ai_advice_api_returns_demo_advice(monkeypatch):

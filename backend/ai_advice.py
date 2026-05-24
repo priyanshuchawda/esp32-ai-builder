@@ -26,6 +26,7 @@ GEMINI_GEMMA_FALLBACK_MODEL = os.getenv(
     "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
 ).strip()
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "10000"))
 
 SYSTEM_PROMPT = """You explain Wi-Fi CSI room-sensing output for a judge demo.
 You never claim camera vision, identity, medical diagnosis, or true DensePose.
@@ -52,7 +53,12 @@ def query_ai_advice(observatory: dict[str, Any], client_factory=None) -> dict[st
         return build_rule_based_advice(observatory)
 
     client = (
-        client_factory() if client_factory else genai.Client(api_key=GEMINI_API_KEY)
+        client_factory()
+        if client_factory
+        else genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=GEMINI_HTTP_TIMEOUT_MS),
+        )
     )
     primary_model = GEMINI_GEMMA_MODEL
     for index, model in enumerate(_hosted_models()):
@@ -70,6 +76,7 @@ def query_ai_advice(observatory: dict[str, Any], client_factory=None) -> dict[st
             )
             advice = _parse_advice(response.text or "")
             if advice is not None:
+                advice = _align_with_trust_gate(advice, observatory)
                 return _with_metadata(
                     advice,
                     provider="gemini",
@@ -187,6 +194,49 @@ def _parse_advice(text: str) -> dict[str, Any] | None:
     data["why"] = [str(reason) for reason in data["why"][:3]]
     data["confidence"] = max(0.0, min(1.0, float(data["confidence"])))
     return data
+
+
+def _align_with_trust_gate(
+    advice: dict[str, Any], observatory: dict[str, Any]
+) -> dict[str, Any]:
+    signal = observatory.get("signal") or {}
+    visual = observatory.get("visual") or {}
+    persons = observatory.get("persons") or {}
+
+    quality = str(signal.get("quality") or "UNKNOWN")
+    trust = str(visual.get("trust") or "blocked")
+    pose_state = str(visual.get("pose_state") or "unknown")
+    is_empty = persons.get("range") == "0" or pose_state == "none"
+
+    if quality != "GOOD" or trust in {"weak", "blocked"}:
+        if advice["status"] == "trusted":
+            gated = build_rule_based_advice(observatory)
+            advice = {**advice}
+            advice["status"] = "weak" if trust != "blocked" else "blocked"
+            advice["room_interpretation"] = gated["room_interpretation"]
+            advice["next_action"] = gated["next_action"]
+            advice["judge_caption"] = gated["judge_caption"]
+            advice["telegram_message"] = gated["telegram_message"]
+            advice["confidence"] = min(float(advice["confidence"]), 0.55)
+            advice["why"] = _prepend_reason(advice["why"], f"quality {quality.lower()}")
+        return advice
+
+    if is_empty and advice["status"] != "trusted":
+        advice = {**advice}
+        advice["status"] = "trusted"
+        advice["room_interpretation"] = (
+            "The compact CSI state supports a trusted empty-room baseline."
+        )
+        advice["judge_caption"] = "Trusted RF baseline: no occupied zone detected."
+        advice["telegram_message"] = "Trusted CSI: room appears empty."
+        advice["next_action"] = "Keep this run as a calibration reference."
+        advice["why"] = _prepend_reason(advice["why"], "empty room baseline trusted")
+        advice["confidence"] = max(float(advice["confidence"]), 0.8)
+    return advice
+
+
+def _prepend_reason(reasons: list[str], reason: str) -> list[str]:
+    return list(dict.fromkeys([reason, *[str(item) for item in reasons if item]]))[:3]
 
 
 def _clean_json(text: str) -> str:

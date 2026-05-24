@@ -18,6 +18,12 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { ObservatoryScene, type ObservatoryPayload } from './ObservatoryScene'
+import {
+  buildFallbackAiAdvice,
+  formatAdviceModel,
+  type AiAdvice,
+  type AiAdvicePayload,
+} from './aiAdvice'
 
 type Quality = {
   status: string
@@ -441,6 +447,7 @@ function App() {
   const [observatoryPayload, setObservatoryPayload] = useState<ObservatoryPayload | null>(null)
   const [observatoryStatus, setObservatoryStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [observatoryError, setObservatoryError] = useState('')
+  const [aiAdvice, setAiAdvice] = useState<AiAdvice | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -476,24 +483,27 @@ function App() {
 
     const controller = new AbortController()
 
-    fetch(`${API_BASE}/api/observatory-live?mode=demo&scenario=${selectedScenario}`, {
+    fetch(`${API_BASE}/api/ai-advice?mode=demo&scenario=${selectedScenario}`, {
       signal: controller.signal,
     })
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`Observatory returned ${response.status}`)
+          throw new Error(`AI advice returned ${response.status}`)
         }
-        return response.json() as Promise<ObservatoryPayload>
+        return response.json() as Promise<AiAdvicePayload>
       })
       .then((data) => {
-        setObservatoryPayload(data)
+        setObservatoryPayload(data.observatory)
+        setAiAdvice(data.advice)
         setObservatoryStatus('done')
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return
         }
-        setObservatoryPayload(buildFallbackObservatory(payload.selected, 'local_fallback'))
+        const fallbackObservatory = buildFallbackObservatory(payload.selected, 'local_fallback')
+        setObservatoryPayload(fallbackObservatory)
+        setAiAdvice(buildFallbackAiAdvice(fallbackObservatory))
         setObservatoryError(error instanceof Error ? error.message : 'Observatory demo failed')
         setObservatoryStatus('error')
       })
@@ -526,19 +536,23 @@ function App() {
     setObservatoryMode('live')
     setObservatoryStatus('running')
     setObservatoryError('')
-    fetch(`${API_BASE}/api/observatory-live?mode=live&duration=3&udp_port=5005`)
+    setAiAdvice(null)
+    fetch(`${API_BASE}/api/ai-advice?mode=live&duration=3&udp_port=5005`)
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`Observatory live returned ${response.status}`)
+          throw new Error(`AI advice live returned ${response.status}`)
         }
-        return response.json() as Promise<ObservatoryPayload>
+        return response.json() as Promise<AiAdvicePayload>
       })
       .then((data) => {
-        setObservatoryPayload(data)
+        setObservatoryPayload(data.observatory)
+        setAiAdvice(data.advice)
         setObservatoryStatus('done')
       })
       .catch((error: unknown) => {
-        setObservatoryPayload(buildFallbackObservatory(liveProbe?.snapshot ?? payload.live, 'local_fallback'))
+        const fallbackObservatory = buildFallbackObservatory(liveProbe?.snapshot ?? payload.live, 'local_fallback')
+        setObservatoryPayload(fallbackObservatory)
+        setAiAdvice(buildFallbackAiAdvice(fallbackObservatory))
         setObservatoryError(error instanceof Error ? error.message : 'Observatory live failed')
         setObservatoryStatus('error')
       })
@@ -561,6 +575,7 @@ function App() {
   const liveValues = useMemo(() => fingerprintValues(live.fingerprint.bars), [live.fingerprint.bars])
   const wavePath = buildWavePath(selectedValues)
   const observatory = observatoryPayload ?? buildFallbackObservatory(selected, 'local_fallback')
+  const advice = aiAdvice ?? buildFallbackAiAdvice(observatory)
 
   return (
     <main className="shell">
@@ -601,6 +616,7 @@ function App() {
             setObservatoryMode('demo')
             setObservatoryStatus('running')
             setObservatoryError('')
+            setAiAdvice(null)
           }}
           type="button"
         >
@@ -618,9 +634,11 @@ function App() {
             setObservatoryPayload(null)
             setObservatoryStatus('running')
             setObservatoryError('')
+            setAiAdvice(null)
           }}
           onLive={runObservatoryLiveProbe}
           payload={observatory}
+          advice={advice}
           status={observatoryStatus}
         />
       ) : (
@@ -807,6 +825,7 @@ function App() {
 }
 
 function ObservatoryExperience({
+  advice,
   error,
   mode,
   onDemo,
@@ -814,6 +833,7 @@ function ObservatoryExperience({
   payload,
   status,
 }: {
+  advice: AiAdvice
   error: string
   mode: ObservatoryMode
   onDemo: () => void
@@ -847,6 +867,28 @@ function ObservatoryExperience({
       </div>
 
       <aside className="observatory-hud" aria-label="observatory signal summary">
+        <div className={`hud-block ai-advice-card advice-${statusClass(advice.status)}`}>
+          <div className="hud-heading-row">
+            <p className="eyebrow">Gemma advice</p>
+            <span>{formatAdviceModel(advice)}</span>
+          </div>
+          <strong>{advice.judge_caption}</strong>
+          <p>{advice.room_interpretation}</p>
+          <div className="reason-list">
+            {advice.why.map((reason) => (
+              <span key={reason}>{reason}</span>
+            ))}
+          </div>
+          <div className="advice-next">
+            <span>Next</span>
+            <strong>{advice.next_action}</strong>
+          </div>
+          <div className="telegram-copy">
+            <span>Telegram</span>
+            <code>{advice.telegram_message}</code>
+          </div>
+        </div>
+
         <div className="hud-block">
           <p className="eyebrow">Wi-Fi signal</p>
           <div className="hud-grid">

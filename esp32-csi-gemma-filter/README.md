@@ -57,6 +57,9 @@ pip install -r requirements.txt
 
 The hosted advisor tries `gemma-4-31b-it` first for stronger reasoning. If that call fails or returns invalid JSON, it retries `gemma-4-26b-a4b-it` before falling back to deterministic local rules. The engine records `advisor_model` and `advisor_fallback_used` in the decision output so runs can be audited without exposing API keys.
 
+Set `GEMINI_HTTP_TIMEOUT_MS=10000` (default) to keep each hosted advisor call
+bounded during live runs; on a timeout the engine proceeds to its fallback path.
+
 ### 3. Optional Local Ollama Fallback
 If you want to use a local Ollama server instead of the Gemini API, set:
 

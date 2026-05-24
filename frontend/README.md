@@ -1,73 +1,44 @@
-# React + TypeScript + Vite
+# ESP32 CSI Observatory Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React/Vite interface for the ESP32 Wi-Fi CSI judge demo. The default experience
+includes the operational dashboard and the full-screen Observatory view.
 
-Currently, two official plugins are available:
+## Views
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Dashboard**: signal quality, occupancy, cadence, room state, and live probe
+  summaries.
+- **Observatory**: Three.js RF-field visualization driven by compact CSI state,
+  not camera pose or true DensePose.
+- **Gemma advice panel**: uses `/api/ai-advice` to show the hosted Gemma model
+  used, fallback status, judge-safe interpretation, recommended next action,
+  and the Telegram-safe message.
 
-## React Compiler
+The live view only claims an activity state when the backend trust gate allows
+it. Weak data renders a guarded explanation instead of a human/activity claim.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Start
 
-## Expanding the ESLint configuration
+Start the backend from the repository root:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+uv run --project backend python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Start the frontend in a second terminal:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```powershell
+cd frontend
+$env:VITE_API_BASE='http://127.0.0.1:8000'
+pnpm.cmd run dev --host 127.0.0.1 --port 5177
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Open `http://127.0.0.1:5177`, choose **Observatory**, then choose **Live ESP**
+for a three-second real UDP capture and hosted Gemma interpretation.
+
+## Validate
+
+```powershell
+pnpm.cmd run test
+pnpm.cmd run lint
+pnpm.cmd run build
 ```
