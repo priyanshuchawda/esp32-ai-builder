@@ -563,7 +563,7 @@ class RuViewDSP:
         window_size = min(len(raw_arr), int(self.fps * 3))
         recent_raw = raw_arr[-window_size:]
         variance = np.var(recent_raw)
-        std_dev = np.std(recent_raw)
+        std_dev = variance ** 0.5
         
         presence = (variance > effective_presence_threshold) or (std_dev > (effective_presence_threshold * 0.8))
         

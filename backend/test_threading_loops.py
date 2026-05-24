@@ -105,14 +105,15 @@ class TestThreadingLoops(unittest.TestCase):
             args=("COM5", 115200, self.shutdown_event, self.data_queue, self.config)
         )
         t.start()
-        
-        time.sleep(0.3)
-        self.shutdown_event.set()
-        t.join(timeout=1.0)
-        
-        # Verify queue contains parsed serial packets
-        self.assertFalse(self.data_queue.empty())
-        ui_pkg = self.data_queue.get()
+
+        try:
+            # Wait for the observable result instead of assuming filter startup
+            # completes within a fixed scheduling interval.
+            ui_pkg = self.data_queue.get(timeout=3.0)
+        finally:
+            self.shutdown_event.set()
+            t.join(timeout=1.0)
+
         self.assertEqual(ui_pkg["stats"]["rssi"], -48)
         self.assertEqual(ui_pkg["stats"]["freq_mhz"], 2437)
 
