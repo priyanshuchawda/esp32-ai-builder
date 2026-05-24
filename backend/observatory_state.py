@@ -30,23 +30,20 @@ def build_observatory_state(
     person_count = snapshot.get("person_count") or _unknown_person_count()
 
     visual = _visual_projection(telemetry, quality, occupancy, motion, cadence)
+    displayed_person_count = _person_projection(person_count, source)
 
     return {
         "source": source,
         "truth_label": TRUTH_LABEL,
         "visual": visual,
-        "persons": person_count,
+        "persons": displayed_person_count,
         "signal": {
             "quality": str(quality.get("status") or "UNKNOWN"),
             "fps": round(float(quality.get("fps", 0.0) or 0.0), 2),
             "packets": int((udp_summary or {}).get("packets", 0) or 0),
             "reasons": list(quality.get("reasons") or []),
         },
-        "vitals": {
-            "resp_bpm": round(float(telemetry.get("resp_bpm", 0.0) or 0.0), 1),
-            "heart_bpm": round(float(telemetry.get("heart_bpm", 0.0) or 0.0), 1),
-            "available": bool(telemetry.get("resp_bpm") or telemetry.get("heart_bpm")),
-        },
+        "vitals": _vitals_projection(telemetry, visual, source),
         "motion": {
             "display_level": str(motion.get("display_level") or "UNKNOWN"),
             "score": round(float(motion.get("score", 0.0) or 0.0), 3),
@@ -61,6 +58,81 @@ def build_observatory_state(
         "material_change": snapshot.get("material_change") or {},
         "config": config or {},
         "snapshot": snapshot,
+    }
+
+
+def _person_projection(person_count: dict[str, Any], source: str) -> dict[str, Any]:
+    displayed = dict(person_count)
+    if source != "actual_udp_probe" or displayed.get("range") in {"0", "unknown"}:
+        return displayed
+
+    ranges = {"1": "1?", "2+": "2+?"}
+    labels = {
+        "1": "single-zone candidate",
+        "2+": "multi-zone candidate",
+    }
+    original_range = str(displayed.get("range") or "unknown")
+    displayed["range"] = ranges.get(original_range, "unknown")
+    displayed["label"] = labels.get(original_range, "count candidate")
+    displayed["confidence"] = "candidate"
+    displayed["trusted"] = False
+    displayed["reasons"] = list(
+        dict.fromkeys(
+            [*list(displayed.get("reasons") or []), "single_link_count_not_verified"]
+        )
+    )
+    return displayed
+
+
+def _vitals_projection(
+    telemetry: dict[str, Any], visual: dict[str, Any], source: str
+) -> dict[str, Any]:
+    resp_bpm = round(float(telemetry.get("resp_bpm", 0.0) or 0.0), 1)
+    heart_bpm = round(float(telemetry.get("heart_bpm", 0.0) or 0.0), 1)
+    values_available = bool(resp_bpm or heart_bpm)
+    if source != "actual_udp_probe":
+        return {
+            "resp_bpm": resp_bpm,
+            "heart_bpm": heart_bpm,
+            "available": values_available,
+            "trusted": values_available,
+            "label": "controlled demo" if values_available else "not available",
+            "reasons": ["simulated_scenario"] if values_available else [],
+        }
+
+    if visual.get("trust") != "trusted" or visual.get("pose_state") == "none":
+        return _hidden_vitals(resp_bpm, heart_bpm, "occupancy not suitable")
+
+    if visual.get("pose_state") in {"moving", "walking", "exercise", "fallen"}:
+        return _hidden_vitals(resp_bpm, heart_bpm, "motion blocks estimate")
+
+    plausible = (not resp_bpm or 6.0 <= resp_bpm <= 40.0) and (
+        not heart_bpm or 35.0 <= heart_bpm <= 200.0
+    )
+    if not plausible:
+        return _hidden_vitals(resp_bpm, heart_bpm, "rate outside screening range")
+
+    if not values_available:
+        return _hidden_vitals(resp_bpm, heart_bpm, "not available")
+
+    return {
+        "resp_bpm": resp_bpm,
+        "heart_bpm": heart_bpm,
+        "available": True,
+        "trusted": False,
+        "label": "experimental estimate",
+        "reasons": ["single_link_vitals_not_validated"],
+    }
+
+
+def _hidden_vitals(resp_bpm: float, heart_bpm: float, label: str) -> dict[str, Any]:
+    return {
+        "resp_bpm": resp_bpm,
+        "heart_bpm": heart_bpm,
+        "available": False,
+        "trusted": False,
+        "label": label,
+        "reasons": [label.replace(" ", "_")],
     }
 
 

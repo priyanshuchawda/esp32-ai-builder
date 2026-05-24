@@ -15,6 +15,9 @@ includes the operational dashboard and the full-screen Observatory view.
 
 The live view only claims an activity state when the backend trust gate allows
 it. Weak data renders a guarded explanation instead of a human/activity claim.
+Live person-count values are candidate indicators rather than verified counts;
+vital numbers are hidden during movement or weak signal and otherwise labeled
+as experimental estimates.
 
 ## Start
 

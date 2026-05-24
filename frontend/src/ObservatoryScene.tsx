@@ -27,6 +27,9 @@ export type ObservatoryPayload = {
     resp_bpm: number
     heart_bpm: number
     available: boolean
+    trusted: boolean
+    label: string
+    reasons: string[]
   }
   motion: {
     display_level: string
