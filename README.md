@@ -101,6 +101,11 @@ and blocks activity claims when signal quality is not trusted. Single-link
 live counts appear as candidates, and live vital estimates are suppressed
 during motion or low-confidence conditions.
 
+After a Live ESP snapshot is displayed, **Generate briefing** creates an
+on-demand Gemma judge report from that same compact event plus calibration
+readiness. The briefing states its limitations and does not run a second
+capture.
+
 On the **Dashboard**, select **Refresh** in **Gemma calibration coach** to
 interpret existing local `empty`, `sitting`, and `walking` labeled windows.
 The coach reports readiness and held-out accuracy, then recommends a next

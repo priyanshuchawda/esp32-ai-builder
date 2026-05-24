@@ -24,6 +24,7 @@ from backend.esp_live_probe import (
     run_udp_probe,
     summarize_target_ip,
 )
+from backend.judge_briefing import query_judge_briefing
 from backend.material_change import (
     MaterialChangeTracker,
     build_demo_material_change,
@@ -380,6 +381,29 @@ def calibration_coach() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "report": report,
         "advice": query_calibration_coach(report),
+    }
+
+
+@app.post("/api/judge-briefing")
+def judge_briefing(request: AiInterpretRequest) -> dict:
+    """Generate a briefing for an already displayed Observatory state."""
+
+    missing = [
+        section
+        for section in INTERPRET_REQUIRED_SECTIONS
+        if section not in request.observatory
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Observatory payload is missing required sections: {', '.join(missing)}",
+        )
+    calibration = build_calibration_snapshot()
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "event_signature": build_event_signature(request.observatory),
+        "calibration": calibration,
+        "briefing": query_judge_briefing(request.observatory, calibration),
     }
 
 

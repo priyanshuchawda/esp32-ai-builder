@@ -17,6 +17,8 @@ includes the operational dashboard and the full-screen Observatory view.
 - **Gemma calibration coach**: on explicit refresh, summarizes existing
   labeled-window readiness and evaluation accuracy, then suggests the next
   capture label without creating data.
+- **Judge briefing**: after a Live ESP snapshot, explicitly generates a
+  bounded Gemma report from that captured evidence and calibration status.
 
 The live view only claims an activity state when the backend trust gate allows
 it. Weak data renders a guarded explanation instead of a human/activity claim.
