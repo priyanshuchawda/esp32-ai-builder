@@ -14,6 +14,8 @@ Useful endpoints:
 - `/api/ai-advice`: Gemma-backed explanation for compact Observatory state.
 - `POST /api/ai-advice/interpret`: interprets one already-captured Observatory
   snapshot without performing a second ESP probe.
+- `/api/calibration-coach`: Gemma-backed guidance over the existing local
+  activity-label readiness and held-out evaluation report.
 
 `/api/ai-advice` uses `gemma-4-31b-it` as the primary hosted model and
 `gemma-4-26b-a4b-it` as fallback when `GEMINI_API_KEY` is available. Hosted
@@ -32,3 +34,7 @@ For `actual_udp_probe` Observatory responses, occupied person counts are shown
 as single-link candidates (`1?` / `2+?`) rather than verified counts. Live
 vital numbers are hidden during motion or weak/unsuitable occupancy, and any
 still-room value that passes screening is labeled as an experimental estimate.
+
+`/api/calibration-coach` loads the existing filtering-engine label report and
+sends only compact counts and evaluation output to hosted Gemma. It does not
+start a capture or transmit raw CSI records.

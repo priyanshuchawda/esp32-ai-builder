@@ -100,3 +100,8 @@ model responded, prepares a Telegram-safe message without claiming delivery,
 and blocks activity claims when signal quality is not trusted. Single-link
 live counts appear as candidates, and live vital estimates are suppressed
 during motion or low-confidence conditions.
+
+On the **Dashboard**, select **Refresh** in **Gemma calibration coach** to
+interpret existing local `empty`, `sitting`, and `walking` labeled windows.
+The coach reports readiness and held-out accuracy, then recommends a next
+capture label without recording or uploading raw CSI samples.

@@ -14,6 +14,9 @@ includes the operational dashboard and the full-screen Observatory view.
   and a Telegram-safe prepared message.
 - **Evidence timeline**: in Live ESP mode, records up to five changed ESP
   inference states and their matching Gemma interpretations.
+- **Gemma calibration coach**: on explicit refresh, summarizes existing
+  labeled-window readiness and evaluation accuracy, then suggests the next
+  capture label without creating data.
 
 The live view only claims an activity state when the backend trust gate allows
 it. Weak data renders a guarded explanation instead of a human/activity claim.
