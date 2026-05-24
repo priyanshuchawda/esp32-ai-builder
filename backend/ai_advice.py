@@ -46,6 +46,22 @@ Required JSON object:
 """
 
 
+def build_event_signature(observatory: dict[str, Any]) -> str:
+    signal = observatory.get("signal") or {}
+    visual = observatory.get("visual") or {}
+    persons = observatory.get("persons") or {}
+    motion = observatory.get("motion") or {}
+    values = (
+        observatory.get("source") or "unknown",
+        signal.get("quality") or "UNKNOWN",
+        visual.get("trust") or "blocked",
+        visual.get("pose_state") or "unknown",
+        persons.get("range") or "unknown",
+        motion.get("state") or "unknown",
+    )
+    return "|".join(str(value) for value in values)
+
+
 def query_ai_advice(observatory: dict[str, Any], client_factory=None) -> dict[str, Any]:
     """Return Gemma advice for compact observatory state, with rules fallback."""
 
