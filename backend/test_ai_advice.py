@@ -41,6 +41,21 @@ def test_rule_based_ai_advice_blocks_weak_signal(monkeypatch):
     assert advice["telegram_message"]
 
 
+def test_observatory_event_signature_tracks_display_transition():
+    from backend.ai_advice import build_event_signature
+
+    first = build_event_signature(WEAK_OBSERVATORY)
+    changed = build_event_signature(
+        {
+            **WEAK_OBSERVATORY,
+            "signal": {**WEAK_OBSERVATORY["signal"], "quality": "GOOD"},
+        }
+    )
+
+    assert first == "actual_udp_probe|WEAK|weak|unknown|unknown|insufficient_data"
+    assert changed != first
+
+
 def test_ai_advice_uses_primary_gemma_model(monkeypatch):
     monkeypatch.setattr("backend.ai_advice.GEMINI_API_KEY", "test-key")
     monkeypatch.setattr("backend.ai_advice.GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
@@ -215,3 +230,38 @@ def test_ai_advice_api_returns_demo_advice(monkeypatch):
     assert data["source"] == "demo"
     assert data["advice"]["judge_caption"] == "Gemma-ready RF explanation."
     assert data["observatory"]["visual"]["pose_state"] == "walking"
+
+
+def test_ai_interpret_endpoint_uses_posted_snapshot_without_new_probe(monkeypatch):
+    def fail_if_probed(**_kwargs):
+        raise AssertionError("live probe must not run during interpretation")
+
+    monkeypatch.setattr("backend.main.run_udp_probe", fail_if_probed)
+    monkeypatch.setattr(
+        "backend.main.query_ai_advice",
+        lambda _observatory: {
+            "provider": "rules",
+            "model": "rules",
+            "status": "weak",
+        },
+    )
+
+    response = TestClient(app).post(
+        "/api/ai-advice/interpret", json={"observatory": WEAK_OBSERVATORY}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source"] == "actual_udp_probe"
+    assert (
+        data["event_signature"]
+        == "actual_udp_probe|WEAK|weak|unknown|unknown|insufficient_data"
+    )
+
+
+def test_ai_interpret_endpoint_rejects_incomplete_observatory_payload():
+    response = TestClient(app).post(
+        "/api/ai-advice/interpret", json={"observatory": {"source": "bad"}}
+    )
+
+    assert response.status_code == 422

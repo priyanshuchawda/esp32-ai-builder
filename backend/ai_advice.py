@@ -26,7 +26,7 @@ GEMINI_GEMMA_FALLBACK_MODEL = os.getenv(
     "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it"
 ).strip()
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "high").strip()
-GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "10000"))
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "60000"))
 
 SYSTEM_PROMPT = """You explain Wi-Fi CSI room-sensing output for a judge demo.
 You never claim camera vision, identity, medical diagnosis, or true DensePose.
@@ -44,6 +44,22 @@ Required JSON object:
   "confidence": 0.0
 }
 """
+
+
+def build_event_signature(observatory: dict[str, Any]) -> str:
+    signal = observatory.get("signal") or {}
+    visual = observatory.get("visual") or {}
+    persons = observatory.get("persons") or {}
+    motion = observatory.get("motion") or {}
+    values = (
+        observatory.get("source") or "unknown",
+        signal.get("quality") or "UNKNOWN",
+        visual.get("trust") or "blocked",
+        visual.get("pose_state") or "unknown",
+        persons.get("range") or "unknown",
+        motion.get("state") or "unknown",
+    )
+    return "|".join(str(value) for value in values)
 
 
 def query_ai_advice(observatory: dict[str, Any], client_factory=None) -> dict[str, Any]:

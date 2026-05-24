@@ -18,7 +18,7 @@ Do not commit real tokens. Copy `esp32-csi-gemma-filter/.env.example` to a local
 - `GEMINI_GEMMA_MODEL`: Primary hosted advisor model, defaults to `gemma-4-31b-it`.
 - `GEMINI_GEMMA_FALLBACK_MODEL`: Hosted retry model, defaults to `gemma-4-26b-a4b-it`.
 - `GEMINI_HTTP_TIMEOUT_MS`: Maximum wait per hosted Gemma attempt, defaults to
-  `10000` for responsive live demos.
+  `60000` because Gemma 4 thinking responses can take more than 20 seconds.
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token from BotFather.
 - `TELEGRAM_CHAT_ID`: Your chat ID after you send `/start` to the bot.
 - `HUMAN_ALERT_ENABLED=true`: Enables Telegram alerts when human presence is detected.
@@ -92,8 +92,11 @@ pnpm.cmd run dev --host 127.0.0.1 --port 5177
 ```
 
 Open `http://127.0.0.1:5177` and select **Observatory**. **Demo** displays a
-controlled scenario; **Live ESP** captures the real UDP stream and requests
-Gemma advice from the compact CSI summary. The panel shows which model
-responded and blocks activity claims when signal quality is not trusted.
-Single-link live counts appear as candidates, and live vital estimates are
-suppressed during motion or low-confidence conditions.
+controlled scenario; **Live ESP** first renders the real UDP-derived snapshot,
+then requests Gemma interpretation only when the visible evidence state
+changes. The evidence timeline separates ESP inference from Gemma
+interpretation and retains the five latest transitions. The panel shows which
+model responded, prepares a Telegram-safe message without claiming delivery,
+and blocks activity claims when signal quality is not trusted. Single-link
+live counts appear as candidates, and live vital estimates are suppressed
+during motion or low-confidence conditions.

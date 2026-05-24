@@ -11,7 +11,9 @@ includes the operational dashboard and the full-screen Observatory view.
   not camera pose or true DensePose.
 - **Gemma advice panel**: uses `/api/ai-advice` to show the hosted Gemma model
   used, fallback status, judge-safe interpretation, recommended next action,
-  and the Telegram-safe message.
+  and a Telegram-safe prepared message.
+- **Evidence timeline**: in Live ESP mode, records up to five changed ESP
+  inference states and their matching Gemma interpretations.
 
 The live view only claims an activity state when the backend trust gate allows
 it. Weak data renders a guarded explanation instead of a human/activity claim.
@@ -36,7 +38,9 @@ pnpm.cmd run dev --host 127.0.0.1 --port 5177
 ```
 
 Open `http://127.0.0.1:5177`, choose **Observatory**, then choose **Live ESP**
-for a three-second real UDP capture and hosted Gemma interpretation.
+for a three-second real UDP capture. The scene updates from the ESP snapshot
+first; a hosted Gemma interpretation is then attached to each changed
+evidence state.
 
 ## Validate
 

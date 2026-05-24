@@ -7,8 +7,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from backend.ai_advice import query_ai_advice
+from backend.ai_advice import build_event_signature, query_ai_advice
 from backend.csi_demo_simulator import SCENARIOS, build_demo_snapshot
 from backend.csi_power_summary import build_power_summary
 from backend.csi_spectrogram import build_demo_spectrogram
@@ -36,7 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -84,6 +85,11 @@ CAPABILITIES = [
 
 LIVE_ROOM_TRACKER = OnlineRoomStateTracker()
 LIVE_MATERIAL_TRACKER = MaterialChangeTracker(baseline_frames=4)
+INTERPRET_REQUIRED_SECTIONS = ("source", "visual", "persons", "signal", "vitals", "motion")
+
+
+class AiInterpretRequest(BaseModel):
+    observatory: dict
 
 
 @app.get("/api/judge-demo")
@@ -335,6 +341,29 @@ def ai_advice(
         "source": observatory["source"],
         "observatory": observatory,
         "advice": query_ai_advice(observatory),
+    }
+
+
+@app.post("/api/ai-advice/interpret")
+def ai_advice_interpret(request: AiInterpretRequest) -> dict:
+    """Interpret one already captured compact observatory state without re-probing."""
+
+    missing = [
+        section
+        for section in INTERPRET_REQUIRED_SECTIONS
+        if section not in request.observatory
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Observatory payload is missing required sections: {', '.join(missing)}",
+        )
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source": request.observatory["source"],
+        "event_signature": build_event_signature(request.observatory),
+        "advice": query_ai_advice(request.observatory),
     }
 
 

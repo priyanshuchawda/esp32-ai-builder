@@ -22,6 +22,13 @@ export type AiAdvicePayload = {
   advice: AiAdvice
 }
 
+export type AiInterpretPayload = {
+  generated_at: string
+  source: string
+  event_signature: string
+  advice: AiAdvice
+}
+
 export function buildFallbackAiAdvice(observatory: ObservatoryPayload): AiAdvice {
   const weakSignal = observatory.signal.quality !== 'GOOD' || observatory.visual.trust !== 'trusted'
   const emptyRoom = observatory.persons.range === '0' || observatory.visual.pose_state === 'none'
