@@ -1,11 +1,9 @@
 import unittest
 import numpy as np
-from unittest.mock import MagicMock
 from frontend.app import (
     parse_adr018_packet,
     RuViewDSP,
-    ApneaDetector,
-    BUFFER_SIZE
+    ApneaDetector
 )
 
 class TestEdgeCases(unittest.TestCase):

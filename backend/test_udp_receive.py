@@ -32,11 +32,13 @@ def main():
                         iq_data = data[20:]
                         amplitudes = []
                         for i in range(0, min(len(iq_data), n_subcarriers * 2) - 1, 2):
-                            I = iq_data[i]
-                            if I >= 128: I -= 256
+                            in_phase = iq_data[i]
+                            if in_phase >= 128:
+                                in_phase -= 256
                             Q = iq_data[i+1]
-                            if Q >= 128: Q -= 256
-                            amplitudes.append((I*I + Q*Q)**0.5)
+                            if Q >= 128:
+                                Q -= 256
+                            amplitudes.append((in_phase*in_phase + Q*Q)**0.5)
                         if amplitudes:
                             avg_amp = sum(amplitudes) / len(amplitudes)
                             print(f"  Avg Amplitude: {avg_amp:.2f}")

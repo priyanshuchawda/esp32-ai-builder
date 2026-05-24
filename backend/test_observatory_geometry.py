@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 import plotly.graph_objects as go
 from frontend.app import get_skeleton_coords, generate_3d_observatory
 
