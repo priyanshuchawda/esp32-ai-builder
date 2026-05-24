@@ -14,6 +14,8 @@ ESP32 + AI workspace for Wi-Fi CSI sensing experiments, a Python Gemma filtering
 Do not commit real tokens. Copy `esp32-csi-gemma-filter/.env.example` to a local `.env` file and fill:
 
 - `GEMINI_API_KEY`: Gemini API key from Google AI Studio for hosted Gemma 4.
+- `GEMINI_GEMMA_MODEL`: Primary hosted advisor model, defaults to `gemma-4-31b-it`.
+- `GEMINI_GEMMA_FALLBACK_MODEL`: Hosted retry model, defaults to `gemma-4-26b-a4b-it`.
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token from BotFather.
 - `TELEGRAM_CHAT_ID`: Your chat ID after you send `/start` to the bot.
 - `HUMAN_ALERT_ENABLED=true`: Enables Telegram alerts when human presence is detected.

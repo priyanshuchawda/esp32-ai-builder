@@ -54,6 +54,7 @@ def test_get_rule_based_decision():
 def test_query_gemini_advisor_success(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(config, "GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it")
 
     fake_client = MagicMock()
     fake_response = MagicMock()
@@ -67,11 +68,61 @@ def test_query_gemini_advisor_success(monkeypatch):
     assert decision["window_size"] == 9
     assert decision["outlier_threshold"] == 2.5
     assert decision["confidence"] == 0.95
+    assert decision["advisor_provider"] == "gemini"
+    assert decision["advisor_model"] == "gemma-4-31b-it"
+    assert decision["advisor_fallback_used"] is False
 
     call = fake_client.models.generate_content.call_args
     assert call.kwargs["model"] == "gemma-4-31b-it"
     assert "summary features" in call.kwargs["contents"]
     assert call.kwargs["config"].response_mime_type == "application/json"
+
+
+def test_query_gemini_advisor_uses_fallback_model_after_primary_error(monkeypatch):
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-26b-a4b-it")
+
+    fake_client = MagicMock()
+    fallback_response = MagicMock()
+    fallback_response.text = '{\n  "filter": "lowpass",\n  "window_size": 5,\n  "outlier_threshold": 3.0,\n  "lowpass_alpha": 0.18,\n  "confidence": 0.87,\n  "reason": "Fallback model selected smoother lowpass filtering."\n}'
+    fake_client.models.generate_content.side_effect = [
+        RuntimeError("primary unavailable"),
+        fallback_response,
+    ]
+
+    features = {"outlier_ratio": 0.02, "signal_std": 0.7}
+    decision = query_gemini_advisor(features, client_factory=lambda: fake_client)
+
+    assert decision["filter"] == "lowpass"
+    assert decision["lowpass_alpha"] == 0.18
+    assert decision["advisor_provider"] == "gemini"
+    assert decision["advisor_model"] == "gemma-4-26b-a4b-it"
+    assert decision["advisor_primary_model"] == "gemma-4-31b-it"
+    assert decision["advisor_fallback_used"] is True
+
+    calls = fake_client.models.generate_content.call_args_list
+    assert [call.kwargs["model"] for call in calls] == [
+        "gemma-4-31b-it",
+        "gemma-4-26b-a4b-it",
+    ]
+
+
+def test_query_gemini_advisor_avoids_duplicate_fallback_model(monkeypatch):
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_MODEL", "gemma-4-31b-it")
+    monkeypatch.setattr(config, "GEMINI_GEMMA_FALLBACK_MODEL", "gemma-4-31b-it")
+
+    fake_client = MagicMock()
+    fake_client.models.generate_content.side_effect = RuntimeError("model unavailable")
+
+    features = {"outlier_ratio": 0.20, "signal_std": 1.2}
+    decision = query_gemini_advisor(features, client_factory=lambda: fake_client)
+
+    assert fake_client.models.generate_content.call_count == 1
+    assert decision["filter"] == "median"
+    assert decision["advisor_provider"] == "rules"
+    assert decision["advisor_model"] == "rules"
 
 
 def test_query_gemma_advisor_falls_back_without_gemini_key(monkeypatch):

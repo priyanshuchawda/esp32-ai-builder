@@ -51,10 +51,11 @@ pip install -r requirements.txt
    GEMMA_ADVISOR_PROVIDER=gemini
    GEMINI_API_KEY=
    GEMINI_GEMMA_MODEL=gemma-4-31b-it
+   GEMINI_GEMMA_FALLBACK_MODEL=gemma-4-26b-a4b-it
    GEMINI_THINKING_LEVEL=high
    ```
 
-The default hosted model is `gemma-4-31b-it`. You can switch to `gemma-4-26b-a4b-it` by changing `GEMINI_GEMMA_MODEL`.
+The hosted advisor tries `gemma-4-31b-it` first for stronger reasoning. If that call fails or returns invalid JSON, it retries `gemma-4-26b-a4b-it` before falling back to deterministic local rules. The engine records `advisor_model` and `advisor_fallback_used` in the decision output so runs can be audited without exposing API keys.
 
 ### 3. Optional Local Ollama Fallback
 If you want to use a local Ollama server instead of the Gemini API, set:
