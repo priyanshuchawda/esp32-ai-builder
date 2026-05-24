@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.ai_advice import build_event_signature, query_ai_advice
+from backend.calibration_coach import (
+    build_calibration_snapshot,
+    query_calibration_coach,
+)
 from backend.csi_demo_simulator import SCENARIOS, build_demo_snapshot
 from backend.csi_power_summary import build_power_summary
 from backend.csi_spectrogram import build_demo_spectrogram
@@ -364,6 +368,18 @@ def ai_advice_interpret(request: AiInterpretRequest) -> dict:
         "source": request.observatory["source"],
         "event_signature": build_event_signature(request.observatory),
         "advice": query_ai_advice(request.observatory),
+    }
+
+
+@app.get("/api/calibration-coach")
+def calibration_coach() -> dict:
+    """Explain existing activity-label readiness without collecting new data."""
+
+    report = build_calibration_snapshot()
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "report": report,
+        "advice": query_calibration_coach(report),
     }
 
 

@@ -31,6 +31,13 @@ import {
   eventSignature,
   type EvidenceEvent,
 } from './evidenceTimeline'
+import {
+  formatCoachAccuracy,
+  formatCoachModel,
+  formatCoachNextLabel,
+  labelReadiness,
+  type CalibrationCoachPayload,
+} from './calibrationCoach'
 import { formatPersonRange, formatVitalValue } from './observatoryDisplay'
 
 type Quality = {
@@ -461,6 +468,11 @@ function App() {
   const [aiAdvice, setAiAdvice] = useState<AiAdvice | null>(null)
   const [evidenceEvents, setEvidenceEvents] = useState<EvidenceEvent[]>([])
   const latestEventSignature = useRef<string | null>(null)
+  const [calibrationCoach, setCalibrationCoach] = useState<CalibrationCoachPayload | null>(null)
+  const [calibrationCoachStatus, setCalibrationCoachStatus] = useState<
+    'idle' | 'running' | 'done' | 'error'
+  >('idle')
+  const [calibrationCoachError, setCalibrationCoachError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -598,6 +610,26 @@ function App() {
         setAiAdvice(buildFallbackAiAdvice(fallbackObservatory))
         setObservatoryError(error instanceof Error ? error.message : 'Observatory live failed')
         setObservatoryStatus('error')
+      })
+  }
+
+  function runCalibrationCoach() {
+    setCalibrationCoachStatus('running')
+    setCalibrationCoachError('')
+    fetch(`${API_BASE}/api/calibration-coach`)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Calibration coach returned ${response.status}`)
+        }
+        return response.json() as Promise<CalibrationCoachPayload>
+      })
+      .then((data) => {
+        setCalibrationCoach(data)
+        setCalibrationCoachStatus('done')
+      })
+      .catch((error: unknown) => {
+        setCalibrationCoachError(error instanceof Error ? error.message : 'Calibration coach failed')
+        setCalibrationCoachStatus('error')
       })
   }
 
@@ -825,6 +857,61 @@ function App() {
               ? liveProbeError
               : liveProbe?.next_actions[0] ?? live.note ?? live.summary.next_action}
           </p>
+        </article>
+
+        <article className="panel coach-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Gemma calibration coach</p>
+              <h2>{calibrationCoach?.advice.headline ?? 'Capture readiness'}</h2>
+            </div>
+            <button
+              className="probe-button"
+              disabled={calibrationCoachStatus === 'running'}
+              onClick={runCalibrationCoach}
+              type="button"
+            >
+              <RefreshCw size={16} />
+              {calibrationCoachStatus === 'running' ? 'Analyzing' : 'Refresh'}
+            </button>
+          </div>
+          {calibrationCoach ? (
+            <>
+              <div className="coach-summary">
+                <span>
+                  <strong>{formatCoachAccuracy(calibrationCoach.report)}</strong>
+                  evaluation
+                </span>
+                <span>
+                  <strong>{formatCoachNextLabel(calibrationCoach.advice)}</strong>
+                  next state
+                </span>
+                <code>{formatCoachModel(calibrationCoach.advice)}</code>
+              </div>
+              <div className="coach-labels">
+                {['empty', 'sitting', 'walking'].map((label) => {
+                  const readiness = labelReadiness(calibrationCoach.report, label)
+                  return (
+                    <span className={readiness.ready ? 'ready' : ''} key={label}>
+                      <strong>{label}</strong>
+                      {readiness.records} usable
+                      {readiness.needed > 0 ? ` / need ${readiness.needed}` : ''}
+                    </span>
+                  )
+                })}
+              </div>
+              <div className="coach-evidence">
+                {calibrationCoach.advice.evidence.map((fact) => (
+                  <span key={fact}>{fact}</span>
+                ))}
+              </div>
+              <p className="coach-action">{calibrationCoach.advice.next_action}</p>
+            </>
+          ) : (
+            <p className={`muted ${calibrationCoachStatus === 'error' ? 'error' : ''}`}>
+              {calibrationCoachStatus === 'error' ? calibrationCoachError : 'No evaluation loaded.'}
+            </p>
+          )}
         </article>
 
         <article className="panel pipeline-panel">
