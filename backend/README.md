@@ -16,6 +16,8 @@ Useful endpoints:
   snapshot without performing a second ESP probe.
 - `/api/calibration-coach`: Gemma-backed guidance over the existing local
   activity-label readiness and held-out evaluation report.
+- `POST /api/judge-briefing`: generates an on-demand judge report from one
+  posted compact Observatory snapshot and local calibration readiness.
 
 `/api/ai-advice` uses `gemma-4-31b-it` as the primary hosted model and
 `gemma-4-26b-a4b-it` as fallback when `GEMINI_API_KEY` is available. Hosted
@@ -38,3 +40,7 @@ still-room value that passes screening is labeled as an experimental estimate.
 `/api/calibration-coach` loads the existing filtering-engine label report and
 sends only compact counts and evaluation output to hosted Gemma. It does not
 start a capture or transmit raw CSI records.
+
+`POST /api/judge-briefing` does not perform a live probe. Weak signal or
+blocked trust remains an untrusted claim even if hosted Gemma produces more
+confident wording.

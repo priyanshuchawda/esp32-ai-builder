@@ -38,6 +38,11 @@ import {
   labelReadiness,
   type CalibrationCoachPayload,
 } from './calibrationCoach'
+import {
+  formatBriefingModel,
+  type JudgeBriefing,
+  type JudgeBriefingPayload,
+} from './judgeBriefing'
 import { formatPersonRange, formatVitalValue } from './observatoryDisplay'
 
 type Quality = {
@@ -473,6 +478,11 @@ function App() {
     'idle' | 'running' | 'done' | 'error'
   >('idle')
   const [calibrationCoachError, setCalibrationCoachError] = useState('')
+  const [judgeBriefing, setJudgeBriefing] = useState<JudgeBriefing | null>(null)
+  const [judgeBriefingStatus, setJudgeBriefingStatus] = useState<
+    'idle' | 'running' | 'done' | 'error'
+  >('idle')
+  const [judgeBriefingError, setJudgeBriefingError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -562,6 +572,9 @@ function App() {
     setObservatoryStatus('running')
     setObservatoryError('')
     setAiAdvice(null)
+    setJudgeBriefing(null)
+    setJudgeBriefingStatus('idle')
+    setJudgeBriefingError('')
     fetch(`${API_BASE}/api/observatory-live?mode=live&duration=3&udp_port=5005`)
       .then((response) => {
         if (!response.ok) {
@@ -610,6 +623,30 @@ function App() {
         setAiAdvice(buildFallbackAiAdvice(fallbackObservatory))
         setObservatoryError(error instanceof Error ? error.message : 'Observatory live failed')
         setObservatoryStatus('error')
+      })
+  }
+
+  function runJudgeBriefing() {
+    setJudgeBriefingStatus('running')
+    setJudgeBriefingError('')
+    fetch(`${API_BASE}/api/judge-briefing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observatory }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Judge briefing returned ${response.status}`)
+        }
+        return response.json() as Promise<JudgeBriefingPayload>
+      })
+      .then((data) => {
+        setJudgeBriefing(data.briefing)
+        setJudgeBriefingStatus('done')
+      })
+      .catch((error: unknown) => {
+        setJudgeBriefingError(error instanceof Error ? error.message : 'Judge briefing failed')
+        setJudgeBriefingStatus('error')
       })
   }
 
@@ -694,6 +731,8 @@ function App() {
             setAiAdvice(null)
             latestEventSignature.current = null
             setEvidenceEvents([])
+            setJudgeBriefing(null)
+            setJudgeBriefingStatus('idle')
           }}
           type="button"
         >
@@ -706,6 +745,9 @@ function App() {
         <ObservatoryExperience
           error={observatoryError}
           events={evidenceEvents}
+          briefing={judgeBriefing}
+          briefingError={judgeBriefingError}
+          briefingStatus={judgeBriefingStatus}
           mode={observatoryMode}
           onDemo={() => {
             setObservatoryMode('demo')
@@ -715,7 +757,10 @@ function App() {
             setAiAdvice(null)
             latestEventSignature.current = null
             setEvidenceEvents([])
+            setJudgeBriefing(null)
+            setJudgeBriefingStatus('idle')
           }}
+          onBriefing={runJudgeBriefing}
           onLive={runObservatoryLiveProbe}
           payload={observatory}
           advice={advice}
@@ -961,19 +1006,27 @@ function App() {
 
 function ObservatoryExperience({
   advice,
+  briefing,
+  briefingError,
+  briefingStatus,
   error,
   events,
   mode,
   onDemo,
+  onBriefing,
   onLive,
   payload,
   status,
 }: {
   advice: AiAdvice
+  briefing: JudgeBriefing | null
+  briefingError: string
+  briefingStatus: 'idle' | 'running' | 'done' | 'error'
   error: string
   events: EvidenceEvent[]
   mode: ObservatoryMode
   onDemo: () => void
+  onBriefing: () => void
   onLive: () => void
   payload: ObservatoryPayload
   status: 'idle' | 'running' | 'done' | 'error'
@@ -1024,7 +1077,47 @@ function ObservatoryExperience({
             <span>Message ready</span>
             <code>{advice.telegram_message}</code>
           </div>
+          {mode === 'live' ? (
+            <button
+              className="briefing-button"
+              disabled={briefingStatus === 'running' || status === 'running'}
+              onClick={onBriefing}
+              type="button"
+            >
+              <RefreshCw size={15} />
+              {briefingStatus === 'running' ? 'Generating briefing' : 'Generate briefing'}
+            </button>
+          ) : null}
         </div>
+
+        {mode === 'live' && briefing ? (
+          <div className="hud-block briefing-panel">
+            <div className="hud-heading-row">
+              <p className="eyebrow">Judge briefing</p>
+              <span>{formatBriefingModel(briefing)}</span>
+            </div>
+            <strong>{briefing.title}</strong>
+            <p>{briefing.sensing_claim}</p>
+            <div className="briefing-facts">
+              {briefing.evidence.map((fact) => (
+                <span key={fact}>{fact}</span>
+              ))}
+            </div>
+            <p>{briefing.calibration_context}</p>
+            <div className="briefing-limits">
+              {briefing.limitations.map((limitation) => (
+                <span key={limitation}>{limitation}</span>
+              ))}
+            </div>
+            <div className="advice-next">
+              <span>Next</span>
+              <strong>{briefing.next_action}</strong>
+            </div>
+          </div>
+        ) : null}
+        {mode === 'live' && briefingStatus === 'error' ? (
+          <p className="muted error">{briefingError}</p>
+        ) : null}
 
         {mode === 'live' ? (
           <div className="hud-block evidence-timeline">
